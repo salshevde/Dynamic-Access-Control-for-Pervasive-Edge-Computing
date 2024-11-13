@@ -454,7 +454,7 @@ unsigned int enc(int data_class,
     // Clean Up
     element_clear(t);
     element_clear(R2);
-    free(ciphertext);
+    // free(ciphertext);
 
     return 1;
 }
