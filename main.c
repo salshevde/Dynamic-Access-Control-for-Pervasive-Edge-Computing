@@ -10,39 +10,39 @@
 #include <string.h>
 
 #include <openssl/sha.h>
-//  NOTES
-// - replace instances of int with mpz (ig)
-
 //   --------------------------------------------------- utility Functions  ---------------------------------------------------
 
-unsigned char* element_to_bytes_array(element_t e){// COMPRESS for efficient transmission (element_length_in_bytes_compressed)
+unsigned char *element_to_bytes_array(element_t e)
+{ // COMPRESS for efficient transmission (element_length_in_bytes_compressed)
     size_t len = element_length_in_bytes(e);
-    unsigned char* str = (unsigned char*) malloc(len);
-    element_to_bytes(str,e);
+    unsigned char *str = (unsigned char *)pbc_malloc(len);
+    element_to_bytes(str, e);
     return str;
 }
 
-unsigned char* element_to_hash(element_t e){
+unsigned char *element_to_hash(element_t e)
+{
     size_t len = element_length_in_bytes(e);
-    unsigned char* str = (unsigned char*) malloc(len);
-    element_to_bytes(str,e);
+    unsigned char *str = (unsigned char *)pbc_malloc(len);
+    element_to_bytes(str, e);
 
-    unsigned char *hash = (unsigned char*)malloc(SHA256_DIGEST_LENGTH);
-    SHA256(str,len,hash);
+    unsigned char *hash = (unsigned char *)pbc_malloc(SHA256_DIGEST_LENGTH);
+    SHA256(str, len, hash);
     free(str);
     return hash;
 }
 
-void element_to_hash_element(element_t e,element_t *h,pairing_t pairing){
+void element_to_hash_element(element_t e, element_t *h, pairing_t pairing)
+{
     size_t len = element_length_in_bytes(e);
-    unsigned char* str = (unsigned char*) malloc(len);
-    element_to_bytes(str,e);
+    unsigned char *str = (unsigned char *)pbc_malloc(len);
+    element_to_bytes(str, e);
 
     unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256(str,len,hash);
+    SHA256(str, len, hash);
 
-    element_init_G1(*h,pairing);
-    element_from_bytes(*h,hash);
+    element_init_G1(*h, pairing);
+    element_from_bytes(*h, hash);
 }
 
 // element_t hash_to_element(unsigned char* hash,pairing_t pairing){
@@ -50,7 +50,7 @@ void element_to_hash_element(element_t e,element_t *h,pairing_t pairing){
 //     element_t h;
 //     element_init_G1(h);
 //     element_from_bytes(h,hash);
-//     return h;    
+//     return h;
 // }
 //   --------------------------------------------------- Initialize   ---------------------------------------------------
 
@@ -74,7 +74,7 @@ void initialize(int lambda, int n, int data_classes,
     long file_size = ftell(fptr);
     fseek(fptr, 0, SEEK_SET);
 
-    char *buffer = (char *)malloc(file_size);
+    char *buffer = (char *)pbc_malloc(file_size);
     if (!buffer)
     {
         printf("Memory allocation failed");
@@ -87,7 +87,6 @@ void initialize(int lambda, int n, int data_classes,
 
     // Select bilinear groups G1 and GT
     pairing_init_set_buf(*pairing, buffer, file_size);
-
     // CUSTOM Parameter Generation [uncomment as an alternative for file based params]
     // int rbits = lambda, qbits = 2 * lambda;
 
@@ -99,6 +98,8 @@ void initialize(int lambda, int n, int data_classes,
     // Select bilinear groups G1 and GT
     // pairing_init_pbc_param(*pairing, param); // with prime order p : 2^λ ≤p ≤ 2^λ+1
 
+    if (!pairing_is_symmetric(*pairing))
+        pbc_die("pairing must be symmetric");
     element_t a;
     // a generator g ∈ G1 at random
     element_init_G1(*g, *pairing);
@@ -113,12 +114,12 @@ void initialize(int lambda, int n, int data_classes,
     for (int i = 0; i < 2 * n; i++)
     {
         element_init_G1(g_values[i], *pairing);
-        if (i == n) // g_n+1 not defined -> 0
-        {
+        // if (i == n) // g_n+1 not defined -> 0
+        // {
 
-            element_set0(g_values[i]);
-            continue;
-        }
+        //     element_set0(g_values[i]);
+        //     continue;
+        // }
 
         // α^i
         element_t a_i;
@@ -265,26 +266,26 @@ void pub_extract(
 
     element_set1(pub1_temp);
 
-        //  pi (g (n+1-a))
-        for (int a = 0; a < n / 2; a++)
-        {
-            if (auth_u[a] == 0)
-                continue;
-            int index = (n + 1 - 1 - a);
-            element_mul(pub1_temp, pub1_temp, g_values[index]); //(g (n+1-a))
-        }
+    //  pi (g (n+1-a))
+    for (int a = 0; a < n / 2; a++)
+    {
+        if (auth_u[a] == 0)
+            continue;
+        int index = (n + 1 - 1 - a);
+        element_mul(pub1_temp, pub1_temp, g_values[index]); //(g (n+1-a))
+    }
 
-        //( pi (g (n+1-a))) ^y1
-        element_pow_zn(pub1_temp, pub1_temp, y1); 
+    //( pi (g (n+1-a))) ^y1
+    element_pow_zn(pub1_temp, pub1_temp, y1);
 
-        // (dynK)^s
-        element_pow_zn(x, dynK, s);               
+    // (dynK)^s
+    element_pow_zn(x, dynK, s);
 
-        // pub1 =( pi (g (n+1-a))) ^y1.dynk^s
-        element_mul(pub[0], pub1_temp, x); 
+    // pub1 =( pi (g (n+1-a))) ^y1.dynk^s
+    element_mul(pub[0], pub1_temp, x);
 
-        element_clear(pub1_temp);
-        element_clear(x);
+    element_clear(pub1_temp);
+    element_clear(x);
 
     // pub2    = (gn/2)^r
 
@@ -307,14 +308,14 @@ void pub_extract(
     element_init_same_as(pub4_temp, pub[3]);
     element_init_GT(x, pairing);
 
-        // e(g1, gn)
-        element_pairing(x, g_values[0], g_values[n - 1]); 
+    // e(g1, gn)
+    element_pairing(x, g_values[0], g_values[n - 1]);
 
-        //  e(g1, gn)^r
-        element_pow_zn(x, x, r);    
+    //  e(g1, gn)^r
+    element_pow_zn(x, x, r);
 
-        // R1.e(g1, gn)^r
-        element_mul(pub[3], x, R1);
+    // R1.e(g1, gn)^r
+    element_mul(pub[3], x, R1);
 
     element_clear(pub4_temp);
     element_clear(x);
@@ -325,13 +326,12 @@ void pub_extract(
     element_init_same_as(pub5_temp, pub[4]);
     element_init_G1(x1, pairing);
     element_init_GT(x2, pairing);
-        //  g^s
-        element_pow_zn(x1, g, s); 
+    //  g^s
+    element_pow_zn(x1, g, s);
 
-        // H(R1)
-        element_t h;
-        element_to_hash_element(R1,&h,pairing);
-
+    // H(R1)
+    element_t h;
+    element_to_hash_element(R1, &h, pairing);
 
     element_mul(pub[4], x1, h); // g^s.H(R1)
 
@@ -397,23 +397,23 @@ unsigned int enc(int data_class,
     element_t c, temp;
     element_init_G1(c, pairing);
     element_pow_zn(c, g, t);
-    
+
     *C1 = element_to_bytes_array(c);
     element_clear(c);
 
     // C2 = (mpk.gi)^t
     element_init_same_as(c, g_values[data_class]);
-    element_mul(c, mpk, c); 
-    element_pow_zn(c, c, t); 
+    element_mul(c, mpk, g_values[data_class]);
+    element_pow_zn(c, c, t);
     *C2 = element_to_bytes_array(c);
     element_clear(c);
 
     // C3 = R2.e(g1, gn)^t
     element_init_GT(c, pairing);
     element_init_GT(temp, pairing);
-    element_pairing(temp, g_values[0], g_values[n - 1]); //e(g1, gn)
-    element_pow_zn(temp, temp, t); // e(g1, gn)^t
-    element_mul(c, R2, temp); // R2.e(g1, gn)^t
+    element_pairing(temp, g_values[0], g_values[n - 1]); // e(g1, gn)
+    element_pow_zn(temp, temp, t);                       // e(g1, gn)^t
+    element_mul(c, R2, temp);                            // R2.e(g1, gn)^t
     *C3 = element_to_bytes_array(c);
     element_clear(temp);
 
@@ -424,14 +424,14 @@ unsigned int enc(int data_class,
     element_clear(c);
 
     // C5 = M ⊕ H(R2)
-    unsigned char* hash = element_to_hash(R2);
-    *C5 = (unsigned char*)malloc(strlen(plaintext)+1);
-    strcpy(*C5,plaintext);
+    unsigned char *hash = element_to_hash(R2);
+    *C5 = (unsigned char *)pbc_malloc(strlen(plaintext) + 1);
+    strcpy(*C5, plaintext);
     int M_len = strlen(*C5);
     printf("\nEncrypted text: \n");
     for (int i = 0; i < M_len; i++)
     {
-        (*C5)[i] = (*C5)[i]^hash[i%SHA256_DIGEST_LENGTH];
+        (*C5)[i] = (*C5)[i] ^ hash[i % SHA256_DIGEST_LENGTH];
         printf("%c", (*C5)[i]);
     }
     printf("\n");
@@ -454,7 +454,6 @@ unsigned int enc(int data_class,
     // Clean Up
     element_clear(t);
     element_clear(R2);
-    // free(ciphertext);
 
     return 1;
 }
@@ -470,53 +469,54 @@ void dec(int n, int data_classes, int data_class, element_t k_u, element_t pub[]
 
     // Computing A
     element_init_GT(t1, pairing);
-        // A= NUMERATOR 
-            // C3.e(pub1 . a∈Auth(u)a!=i gn+1−a+i, C1)
-            element_init_GT(w, pairing);
-            element_init_GT(x, pairing);
-            element_init_G1(y, pairing);
-            element_init_G1(z, pairing);
+    // A= NUMERATOR
+    // C3.e(pub1 . a∈Auth(u)a!=i gn+1−a+i, C1)
+    element_init_GT(w, pairing);
+    element_init_GT(x, pairing);
+    element_init_G1(y, pairing);
+    element_init_G1(z, pairing);
 
-            element_from_bytes(z, C1);
-            element_from_bytes(w, C3);
+    element_from_bytes(z, C1);
+    element_from_bytes(w, C3);
 
-            // a∈Auth(u)a!=i gn+1−a+i
-            element_set(y, pub[0]);
-            for (int a = 0; a < n / 2; a++)
-            {
-                if (auth[a] == 0 || a == data_class)
-                    continue;
-                int index = n + 1 - a + data_class - 1;
-                element_mul(y, y, g_values[a]);
-            }
+    // a∈Auth(u)a!=i gn+1−a+i
+    element_set(y, pub[0]);
+    for (int a = 0; a < n / 2; a++)
+    {
+        if (auth[a] == 0 || a == data_class)
+            continue;
+        int index = n + 1 - a + data_class - 1;
+        element_mul(y, y, g_values[a]);
+    }
 
-            // e(pub1 . a∈Auth(u)a!=i gn+1−a+i, C1)
-            element_pairing(x, y, z);
-            
-            // C3.e
-            element_mul(t1, w, x);
+    // e(pub1 . a∈Auth(u)a!=i gn+1−a+i, C1)
+    element_pairing(x, y, z);
 
-            element_clear(x);
-            element_clear(y);
-            element_clear(w);
-            element_clear(z);
-        // w = DENOMINATOR
-            element_init_GT(w, pairing);
-            element_init_same_as(x, g_values[data_class]);
-            element_from_bytes(x, C2);
-            element_init_G1(y, pairing);
+    // C3.e
+    element_mul(t1, w, x);
 
-            // a∈Auth(u)gn+1−a
-            for (int a = 0; a < n / 2; a++)
-            {
-                if (auth[a] == 0)
-                    continue;
-                int index = n + 1 - a - 1;
-                element_mul(y, y, g_values[a]);
-            }
+    element_clear(x);
+    element_clear(y);
+    element_clear(w);
+    element_clear(z);
+    // w = DENOMINATOR
+    element_init_GT(w, pairing);
+    element_init_same_as(x, g_values[data_class]);
+    element_from_bytes(x, C2);
+    element_init_G1(y, pairing);
+    element_set1(y);
 
-            // e(C2,Qa∈Auth(u)gn+1−a)
-            element_pairing(w, x, y);
+    // a∈Auth(u)gn+1−a
+    for (int a = 0; a < n / 2; a++)
+    {
+        if (auth[a] == 0)
+            continue;
+        int index = n + 1 - a - 1;
+        element_mul(y, y, g_values[a]);
+    }
+
+    // e(C2,Qa∈Auth(u)gn+1−a)
+    element_pairing(w, x, y);
 
     element_div(A, t1, w);
     element_clear(x);
@@ -527,57 +527,57 @@ void dec(int n, int data_classes, int data_class, element_t k_u, element_t pub[]
     element_init_GT(B, pairing);
     element_init_GT(w, pairing);
     element_init_GT(x, pairing);
-        // w= NUMERATOR 
-            // w= pub4.e(Ku, pub2)
-            element_pairing(x, k_u, pub[1]);
-            
-            element_mul(w, pub[3], x);
-            element_clear(x);
-        
-            // y= 𝜫 j∈Auth(u) 𝜫 b∈Auth(u)b!=j gn/2+1−b+j
-            element_init_GT(x, pairing);
-            element_init_same_as(y, g_values[0]);
-            element_set1(y);
-            for (int j = 0; j < n / 2; j++)
-            {
-                if (auth[j] == 0)
-                    continue;
-                element_init_same_as(z, g_values[0]);
-                element_set1(z);
-                for (int b = 0; b < n / 2; b++)
-                {
-                    if (auth[b] == 0 || b == j)
-                        continue;
-                    int index = n / 2 + 1 - b + j - 1;
-                    element_mul(z, z, g_values[index]);
-                }
+    // w= NUMERATOR
+    // w= pub4.e(Ku, pub2)
+    element_pairing(x, k_u, pub[1]);
 
-                element_mul(y, y, z);
-                element_clear(z);
-            }
+    element_mul(w, pub[3], x);
+    element_clear(x);
 
-            // x = e(𝜫 j∈Auth(u) 𝜫 b∈Auth(u)b!=j gn/2+1−b+j, pub2)
-            element_pairing(x, y, pub[1]);
-        element_mul(w, w, x);
+    // y= 𝜫 j∈Auth(u) 𝜫 b∈Auth(u)b!=j gn/2+1−b+j
+    element_init_GT(x, pairing);
+    element_init_same_as(y, g_values[0]);
+    element_set1(y);
+    for (int j = 0; j < n / 2; j++)
+    {
+        if (auth[j] == 0)
+            continue;
+        element_init_same_as(z, g_values[0]);
+        element_set1(z);
+        for (int b = 0; b < n / 2; b++)
+        {
+            if (auth[b] == 0 || b == j)
+                continue;
+            int index = n / 2 + 1 - b + j - 1;
+            element_mul(z, z, g_values[index]);
+        }
 
-        element_clear(x);
-        element_clear(y);
+        element_mul(y, y, z);
+        element_clear(z);
+    }
 
-        // x = Denominator 
-        element_init_GT(x, pairing);
-        element_init_G1(y, pairing);
+    // x = e(𝜫 j∈Auth(u) 𝜫 b∈Auth(u)b!=j gn/2+1−b+j, pub2)
+    element_pairing(x, y, pub[1]);
+    element_mul(w, w, x);
 
-            // 𝜫 (gn/2+1−b)
-            element_set1(y);
-            for (int b = 0; b < n / 2; b++)
-            {
-                if (auth[b] == 0)
-                    continue;
-                int index = n / 2 + 1 - b - 1;
-                element_mul(y, y, g_values[index]);
-            }
+    element_clear(x);
+    element_clear(y);
 
-        element_pairing(x, pub[2], y);
+    // x = Denominator
+    element_init_GT(x, pairing);
+    element_init_G1(y, pairing);
+
+    // 𝜫 (gn/2+1−b)
+    element_set1(y);
+    for (int b = 0; b < n / 2; b++)
+    {
+        if (auth[b] == 0)
+            continue;
+        int index = n / 2 + 1 - b - 1;
+        element_mul(y, y, g_values[index]);
+    }
+
+    element_pairing(x, pub[2], y);
 
     element_div(B, w, x);
 
@@ -585,12 +585,12 @@ void dec(int n, int data_classes, int data_class, element_t k_u, element_t pub[]
     element_clear(y);
     element_clear(x);
 
-    // MESSAGE : M = H(A.e(pub5.(H(B))−1, C4)−1)−1⊕ C5. 
+    // MESSAGE : M = H(A.e(pub5.(H(B))−1, C4)−1)−1⊕ C5.
 
     // pub5.(H(B))−1
     element_init_G1(w, pairing);
 
-    element_to_hash_element(B,&w,pairing);
+    element_to_hash_element(B, &w, pairing);
 
     element_invert(w, w);
 
@@ -610,10 +610,10 @@ void dec(int n, int data_classes, int data_class, element_t k_u, element_t pub[]
     element_clear(w);
     element_clear(y);
     element_clear(x);
-    
+
     // H(A.e(pub5.(H(B))−1, C4)−1)-1
     element_init_G1(w, pairing);
-    element_to_hash_element(z,&w,pairing);
+    element_to_hash_element(z, &w, pairing);
     element_invert(w, w); // invert hash
 
     // element-> bytes for xor
@@ -622,7 +622,7 @@ void dec(int n, int data_classes, int data_class, element_t k_u, element_t pub[]
     //
     int cipher_len = strlen(C5); // technicall should be equal to dec-len
 
-    unsigned char *M = (unsigned char *)malloc(cipher_len);
+    unsigned char *M = (unsigned char *)pbc_malloc(cipher_len);
     // if (cipher_len != inv_hash_len) {
     //     fprintf(stderr, "Error:%d %dMismatched lengths between inv_hash and C5.\n", cipher_len,inv_hash_len);
     //     return;
@@ -706,7 +706,7 @@ int main()
     int auth_u[] = {0, 1, 1, 0}, n = data_classes * 2; // data class group to be authorized
 
     unsigned char *plaintext = "this is a message in transmission", *ciphertext, *message, *C1, *C2, *C3, *C4, *C5;
-
+    printf("\nPlaintext: %s\n",plaintext);
     // Variable init
 
     pbc_param_t param;
