@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  cloud_server:
+    build:
+      context: .
+      dockerfile: Dockerfiles/cloud.Dockerfile
+    container_name: kac_cloud_server
+    networks:
+      - kac_network
+    ports:
+      - "8080:8080"
+    volumes:
+      - shared-data:/app/data
+
+  data_owner:
+    build:
+      context: .
+      dockerfile: Dockerfiles/owner.Dockerfile
+    container_name: kac_data_owner
+    networks:
+      - kac_network
+    volumes:
+      - shared-data:/app/data
+    depends_on:
+      - cloud_server
+
+  data_user:
+    build:
+      context: .
+      dockerfile: Dockerfiles/user.Dockerfile
+    container_name: kac_data_user
+    networks:
+      - kac_network
+    volumes:
+      - shared-data:/app/data
+    depends_on:
+      - cloud_server
+
+networks:
+  kac_network:
+    driver: bridge
+
+volumes:
+  shared-data:
