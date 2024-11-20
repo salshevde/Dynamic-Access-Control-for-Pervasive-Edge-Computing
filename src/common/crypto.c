@@ -262,7 +262,7 @@ void initialize(int lambda, int n, int data_classes,
 {
 
     // FILE based params [comment if using custom]
-    FILE *fptr = fopen("./a.param", "r");
+    FILE *fptr = fopen("./params/a.param", "r");
     if (!fptr)
     {
         perror("Failed to open parameter file");
@@ -901,34 +901,34 @@ void updateSet(int data_class, int n, int data_classes, int auth[], int type, el
 //     element_t k_u, pub_u, pub[5];
 
 //     //  INITIALIZATION
-//     initialize(
-//         lambda,
-//         n, data_classes,
-//         param,
-//         &pairing,
-//         &g,
-//         // H, // placeholder
-//         g_values);
+    // initialize(
+    //     lambda,
+    //     n, data_classes,
+    //     param,
+    //     &pairing,
+    //     &g,
+    //     // H, // placeholder
+    //     g_values);
 
 //     //  GENERATION
-//     gen(pairing,
-//         g,
-//         msk,
-//         &mpk,
-//         &dynK);
+    // gen(pairing,
+    //     g,
+    //     msk,
+    //     &mpk,
+    //     &dynK);
 
-//     // EXTRACT
+    // // EXTRACT
 
-//     extract(pairing,
-//             msk,
-//             mpk,
-//             dynK,
-//             g,
-//             auth_u,
-//             g_values,
-//             n, data_classes,
-//             &k_u,
-//             &pub_u, pub);
+    // extract(pairing,
+    //         msk,
+    //         mpk,
+    //         dynK,
+    //         g,
+    //         auth_u,
+    //         g_values,
+    //         n, data_classes,
+    //         &k_u,
+    //         &pub_u, pub);
 
 //     //  ENCRYPTION
 //     const SerializedCiphertext *ciphertext = enc(data_class, n, data_classes, msk, mpk, g, g_values, auth_u, pairing, dynK, plaintext);

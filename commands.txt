@@ -1,0 +1,11 @@
+cd src/cloud-server
+gcc -o cloud-storage-server cloud-storage-server.c -lsqlite3 -lpthread
+./cloud_storage_server
+
+cd src/data-owner
+gcc data-owner.c -o owner -lsqlite3
+./owner
+
+cd src/data-user
+gcc data-user.c -o user -lsqlite3
+./user
