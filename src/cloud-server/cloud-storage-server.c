@@ -37,31 +37,31 @@ void init_database(sqlite3 **db)
     }
 
     char *sql = "CREATE TABLE IF NOT EXISTS owners ("
-            "username TEXT PRIMARY KEY,"
-            "password TEXT,"
-            "n_data_classes INT,"
-            "public_params BLOB"
-            ");"
-            "CREATE TABLE IF NOT EXISTS files ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-            "owner TEXT,"
-            "filename TEXT,"
-            "data BLOB,"
-            "FOREIGN KEY (owner) REFERENCES owners(username)"
-            ");"
-            "CREATE TABLE IF NOT EXISTS users ("
-            "username TEXT PRIMARY KEY,"
-            "password TEXT NOT NULL"
-            ");"
-            "CREATE TABLE IF NOT EXISTS auth_u ("
-            "username TEXT,"
-            "ownername TEXT,"
-            "data_classes TEXT,"
-            "PRIMARY KEY (username, ownername),"
-            "FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,"
-            "FOREIGN KEY (ownername) REFERENCES owners(username) ON DELETE CASCADE"
-            ");";
-
+                "username TEXT PRIMARY KEY,"
+                "password TEXT,"
+                "n_data_classes INT,"
+                "public_params BLOB"
+                ");"
+                "CREATE TABLE IF NOT EXISTS files ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                "owner TEXT,"
+                "filename TEXT,"
+                "data_class INT NOT NULL,"
+                "data BLOB,"
+                "FOREIGN KEY (owner) REFERENCES owners(username)"
+                ");"
+                "CREATE TABLE IF NOT EXISTS users ("
+                "username TEXT PRIMARY KEY,"
+                "password TEXT NOT NULL"
+                ");"
+                "CREATE TABLE IF NOT EXISTS auth_u ("
+                "username TEXT,"
+                "ownername TEXT,"
+                "data_classes TEXT,"
+                "PRIMARY KEY (username, ownername),"
+                "FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,"
+                "FOREIGN KEY (ownername) REFERENCES owners(username) ON DELETE CASCADE"
+                ");";
 
     char *err_msg = 0;
     rc = sqlite3_exec(*db, sql, 0, 0, &err_msg);
@@ -235,11 +235,14 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
 {
     char buffer[BUFFER_SIZE];
     char filename[MAX_FILENAME];
+    char data_class_str[16];
+
+    int data_class;
 
     while (1)
     {
 
-        send_message(client_socket, "Choose operation (1: Upload, 2: Delete, 3: Update Params, 4: Update Set, Exit): ");
+        send_message(client_socket, "Choose operation (1: Upload, 2: Delete, 3: Update Params, 4: Update Set, 5: View My File. 6: Exit): ");
         receive_message(client_socket, buffer, sizeof(buffer));
 
         if (buffer[0] == '1')
@@ -247,15 +250,19 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             send_message(client_socket, "Filename: ");
             receive_message(client_socket, filename, sizeof(filename));
 
+            send_message(client_socket, "Data Class: ");
+            receive_message(client_socket, data_class_str, sizeof(data_class_str));
+            data_class = atoi(data_class_str);
             int size;
             char *file_data = receive_file_data(client_socket, &size);
 
             sqlite3_stmt *stmt;
-            const char *sql = "INSERT INTO files (owner, filename, data) VALUES (?, ?, ?)";
+            const char *sql = "INSERT INTO files (owner, filename,data_class, data) VALUES (?, ?, ?,?)";
             sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
             sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
             sqlite3_bind_text(stmt, 2, filename, -1, SQLITE_STATIC);
-            sqlite3_bind_blob(stmt, 3, file_data, size, SQLITE_STATIC);
+            sqlite3_bind_int(stmt, 3, data_class);
+            sqlite3_bind_blob(stmt, 4, file_data, size, SQLITE_STATIC);
 
             if (sqlite3_step(stmt) != SQLITE_DONE)
             {
@@ -405,7 +412,7 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
                 sqlite3_bind_text(stmt, 1, target_user, -1, SQLITE_STATIC);
                 sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
                 sqlite3_bind_text(stmt, 3, data_class_str, -1, SQLITE_STATIC);
-                
+
                 if (sqlite3_step(stmt) == SQLITE_DONE)
                 {
                     send_message(client_socket, "New entry added successfully.\n");
@@ -417,6 +424,30 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             }
         }
         else if (buffer[0] == '5')
+        {
+            send_message(client_socket, "Enter filename: ");
+            receive_message(client_socket, filename, sizeof(filename));
+
+            sqlite3_stmt *stmt;
+            const char *sql = "SELECT data FROM files WHERE owner = ? AND filename = ?";
+            sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+            sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, filename, -1, SQLITE_STATIC);
+            printf("filename");
+            if (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                const void *data = sqlite3_column_blob(stmt, 0);
+                int size = sqlite3_column_bytes(stmt, 0);
+                send_file_data(client_socket, data, size);
+            }
+            else
+            {
+                send_message(client_socket, "0");
+            }
+
+            sqlite3_finalize(stmt);
+        }
+        else if (buffer[0] == '6')
         { // Exit
             break;
         }
@@ -440,7 +471,7 @@ void handle_user(sqlite3 *db, int client_socket, const char *username)
     sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
     sqlite3_bind_text(stmt, 1, owner, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, filename, -1, SQLITE_STATIC);
-
+    printf("filename");
     if (sqlite3_step(stmt) == SQLITE_ROW)
     {
         const void *data = sqlite3_column_blob(stmt, 0);
