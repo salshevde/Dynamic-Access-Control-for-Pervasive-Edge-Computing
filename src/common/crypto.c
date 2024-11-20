@@ -1,6 +1,7 @@
 #include "crypto.h"
 
 // #define PBC_DEBUG
+
 //   --------------------------------------------------- utility Functions  ---------------------------------------------------
 
 unsigned char *element_to_bytes_array(element_t e)

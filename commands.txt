@@ -1,9 +1,9 @@
 cd src/cloud-server
 gcc -o cloud-storage-server cloud-storage-server.c -lsqlite3 -lpthread
-./cloud_storage_server
+./cloud-storage-server
 
 cd src/data-owner
-gcc data-owner.c -o owner -lsqlite3
+gcc data-owner.c ../common/crypto.c -o owner -lsqlite3 -lpbc -lssl -lcrypto -lgmp -lpari
 ./owner
 
 cd src/data-user

@@ -17,14 +17,14 @@
 #define MAX_PASSWORD 64
 #define MAX_CLIENTS 100
 
-//  Mutex for thread-safe 
+//  Mutex for thread-safe
 pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-typedef struct {
-    sqlite3* db;
+typedef struct
+{
+    sqlite3 *db;
     int client_socket;
 } client_args;
-
 
 // database functions
 void init_database(sqlite3 **db)
@@ -37,17 +37,31 @@ void init_database(sqlite3 **db)
     }
 
     char *sql = "CREATE TABLE IF NOT EXISTS owners ("
-                "username TEXT PRIMARY KEY,"
-                "password TEXT,"
-                "public_params BLOB"
-                ");"
-                "CREATE TABLE IF NOT EXISTS files ("
-                "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "owner TEXT,"
-                "filename TEXT,"
-                "data BLOB,"
-                "FOREIGN KEY (owner) REFERENCES owners(username)"
-                ");";
+            "username TEXT PRIMARY KEY,"
+            "password TEXT,"
+            "n_data_classes INT,"
+            "public_params BLOB"
+            ");"
+            "CREATE TABLE IF NOT EXISTS files ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "owner TEXT,"
+            "filename TEXT,"
+            "data BLOB,"
+            "FOREIGN KEY (owner) REFERENCES owners(username)"
+            ");"
+            "CREATE TABLE IF NOT EXISTS users ("
+            "username TEXT PRIMARY KEY,"
+            "password TEXT NOT NULL"
+            ");"
+            "CREATE TABLE IF NOT EXISTS auth_u ("
+            "username TEXT,"
+            "ownername TEXT,"
+            "data_classes TEXT,"
+            "PRIMARY KEY (username, ownername),"
+            "FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,"
+            "FOREIGN KEY (ownername) REFERENCES owners(username) ON DELETE CASCADE"
+            ");";
+
 
     char *err_msg = 0;
     rc = sqlite3_exec(*db, sql, 0, 0, &err_msg);
@@ -123,7 +137,7 @@ void send_file_data(int socket, const char *data, int size)
     }
 }
 
-// Handle owner authentication
+// Handle authentication
 int authenticate_owner(sqlite3 *db, int client_socket, char *username)
 {
     char password[MAX_PASSWORD];
@@ -170,6 +184,52 @@ int authenticate_owner(sqlite3 *db, int client_socket, char *username)
     return 0;
 }
 
+int authenticate_user(sqlite3 *db, int client_socket, char *username)
+{
+    char password[MAX_PASSWORD];
+    int attempts = 2;
+
+    send_message(client_socket, "Username: ");
+    receive_message(client_socket, username, MAX_USERNAME);
+
+    while (attempts > 0)
+    {
+        send_message(client_socket, "Password: ");
+        receive_message(client_socket, password, MAX_PASSWORD);
+
+        sqlite3_stmt *stmt;
+        const char *sql = "SELECT password FROM users WHERE username = ?";
+        sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+        sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+
+        if (sqlite3_step(stmt) == SQLITE_ROW)
+        {
+            const char *stored_pass = (const char *)sqlite3_column_text(stmt, 0);
+            if (strcmp(password, stored_pass) == 0)
+            {
+                send_message(client_socket, "\nAuth Success \n");
+
+                sqlite3_finalize(stmt);
+                return 1;
+            }
+        }
+
+        sqlite3_finalize(stmt);
+        attempts--;
+
+        if (attempts > 0)
+        {
+            send_message(client_socket, "Incorrect password. One more try: ");
+        }
+        else
+        {
+            send_message(client_socket, "Authentication failed. Disconnecting.\n");
+        }
+    }
+
+    return 0;
+}
+
 // Handle owner operations
 void handle_owner_operations(sqlite3 *db, int client_socket, const char *username)
 {
@@ -178,9 +238,8 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
 
     while (1)
     {
-        printf("here");
 
-        send_message(client_socket, "Choose operation (1: Upload, 2: Delete, 3: Update Params, 4: Exit): ");
+        send_message(client_socket, "Choose operation (1: Upload, 2: Delete, 3: Update Params, 4: Update Set, Exit): ");
         receive_message(client_socket, buffer, sizeof(buffer));
 
         if (buffer[0] == '1')
@@ -261,6 +320,103 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             free(params_data);
         }
         else if (buffer[0] == '4')
+        {
+            char target_user[MAX_USERNAME];
+            char data_class_action[BUFFER_SIZE];
+            int data_class_num;
+
+            send_message(client_socket, "Enter the target username: ");
+            receive_message(client_socket, target_user, sizeof(target_user));
+            send_message(client_socket, "Enter 'add' or 'remove' followed by the data class number: ");
+            receive_message(client_socket, data_class_action, sizeof(data_class_action));
+
+            char *action = strtok(data_class_action, " ");
+            char *data_class_str = strtok(NULL, " ");
+            if (!action || !data_class_str || (strcmp(action, "add") != 0 && strcmp(action, "remove") != 0))
+            {
+                send_message(client_socket, "Invalid input. Use 'add <number>' or 'remove <number>'.\n");
+                continue;
+            }
+
+            data_class_num = atoi(data_class_str);
+
+            // Check if the row exists
+            sqlite3_stmt *stmt;
+            const char *check_sql = "SELECT data_classes FROM auth_u WHERE username = ? AND ownername = ?";
+            sqlite3_prepare_v2(db, check_sql, -1, &stmt, 0);
+            sqlite3_bind_text(stmt, 1, target_user, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
+
+            if (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                // Update existing row
+                const char *existing_classes = (const char *)sqlite3_column_text(stmt, 0);
+                char updated_classes[BUFFER_SIZE];
+                memset(updated_classes, 0, sizeof(updated_classes));
+
+                if (strcmp(action, "add") == 0)
+                {
+                    // Add the number if not already in the list
+                    snprintf(updated_classes, sizeof(updated_classes), "%s", existing_classes);
+                    if (!strstr(existing_classes, data_class_str))
+                    {
+                        if (strlen(existing_classes) > 0)
+                        {
+                            strncat(updated_classes, ",", sizeof(updated_classes) - strlen(updated_classes) - 1);
+                        }
+                        strncat(updated_classes, data_class_str, sizeof(updated_classes) - strlen(updated_classes) - 1);
+                    }
+                }
+                else if (strcmp(action, "remove") == 0)
+                {
+                    // Remove the number from the list
+                    char *start, *end;
+                    snprintf(updated_classes, sizeof(updated_classes), "%s,", existing_classes); // Add trailing comma for easier parsing
+                    start = strstr(updated_classes, data_class_str);
+                    if (start)
+                    {
+                        end = start + strlen(data_class_str);
+                        memmove(start, end, strlen(end) + 1); // Shift the rest of the string
+                    }
+                    updated_classes[strlen(updated_classes) - 1] = '\0'; // Remove the trailing comma
+                }
+
+                // Update the table
+                const char *update_sql = "UPDATE auth_u SET data_classes = ? WHERE username = (SELECT username FROM users WHERE username = ?) AND ownername = ?";
+                sqlite3_prepare_v2(db, update_sql, -1, &stmt, 0);
+                sqlite3_bind_text(stmt, 1, updated_classes, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 2, target_user, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 3, username, -1, SQLITE_STATIC);
+
+                if (sqlite3_step(stmt) == SQLITE_DONE)
+                {
+                    send_message(client_socket, "Data classes updated successfully.\n");
+                }
+                else
+                {
+                    send_message(client_socket, "Error updating data classes.\n");
+                }
+            }
+            else
+            {
+                // Insert a new row
+                const char *insert_sql = "INSERT INTO auth_u (username, ownername, data_classes) VALUES (?, ?, ?)";
+                sqlite3_prepare_v2(db, insert_sql, -1, &stmt, 0);
+                sqlite3_bind_text(stmt, 1, target_user, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 3, data_class_str, -1, SQLITE_STATIC);
+                
+                if (sqlite3_step(stmt) == SQLITE_DONE)
+                {
+                    send_message(client_socket, "New entry added successfully.\n");
+                }
+                else
+                {
+                    send_message(client_socket, "Error adding new entry.\n");
+                }
+            }
+        }
+        else if (buffer[0] == '5')
         { // Exit
             break;
         }
@@ -268,7 +424,7 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
 }
 
 // Handle user operations
-void handle_user(sqlite3 *db, int client_socket)
+void handle_user(sqlite3 *db, int client_socket, const char *username)
 {
     char owner[MAX_USERNAME];
     char filename[MAX_FILENAME];
@@ -299,28 +455,33 @@ void handle_user(sqlite3 *db, int client_socket)
     sqlite3_finalize(stmt);
 }
 
-// Handle new owner registration
+// Handle new registration
 void handle_new_owner(sqlite3 *db, int client_socket)
 {
     char username[MAX_USERNAME];
     char password[MAX_PASSWORD];
-
+    char n_data_classes_str[16];
     send_message(client_socket, "New username: ");
     receive_message(client_socket, username, sizeof(username));
 
     send_message(client_socket, "New password: ");
     receive_message(client_socket, password, sizeof(password));
 
+    send_message(client_socket, "Number of data classes: ");
+    receive_message(client_socket, n_data_classes_str, sizeof(n_data_classes_str));
+    int n_data_classes = atoi(n_data_classes_str);
+
     send_message(client_socket, "Send public params file (size in bytes): ");
     int size;
     char *params_data = receive_file_data(client_socket, &size);
 
     sqlite3_stmt *stmt;
-    const char *sql = "INSERT INTO owners (username, password, public_params) VALUES (?, ?, ?)";
+    const char *sql = "INSERT INTO owners (username, password, n_data_classes,  public_params) VALUES (?, ?,?, ?)";
     sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
     sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
     sqlite3_bind_text(stmt, 2, password, -1, SQLITE_STATIC);
-    sqlite3_bind_blob(stmt, 3, params_data, size, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 3, n_data_classes);
+    sqlite3_bind_blob(stmt, 4, params_data, size, SQLITE_STATIC);
 
     if (sqlite3_step(stmt) != SQLITE_DONE)
     {
@@ -329,10 +490,42 @@ void handle_new_owner(sqlite3 *db, int client_socket)
     else
     {
         send_message(client_socket, "Account created successfully.\n");
+
+        handle_owner_operations(db, client_socket, username);
     }
 
     sqlite3_finalize(stmt);
     free(params_data);
+}
+
+void handle_new_user(sqlite3 *db, int client_socket)
+{
+    char username[MAX_USERNAME];
+    char password[MAX_PASSWORD];
+    char n_data_classes_str[16];
+    send_message(client_socket, "New username: ");
+    receive_message(client_socket, username, sizeof(username));
+
+    send_message(client_socket, "New password: ");
+    receive_message(client_socket, password, sizeof(password));
+
+    sqlite3_stmt *stmt;
+    const char *sql = "INSERT INTO users (username, password) VALUES (?, ?)";
+    sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, password, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+    {
+        send_message(client_socket, "Error creating account.\n");
+    }
+    else
+    {
+        send_message(client_socket, "Account created successfully.\n");
+        handle_user(db, client_socket, username);
+    }
+
+    sqlite3_finalize(stmt);
 }
 
 // Main client handler
@@ -410,7 +603,40 @@ void handle_client(sqlite3 *db, int client_socket)
     else if (buffer[0] == '2')
     { // User
         // printf("DEBUG: User interface selected\n");
-        handle_user(db, client_socket);
+
+        if (send_message(client_socket, "1: Sign in, 2: Create new: ") <= 0)
+        {
+            printf("ERROR: Failed to send user options\n");
+            return;
+        }
+
+        bytes_received = receive_message(client_socket, buffer, sizeof(buffer));
+        if (bytes_received <= 0)
+        {
+            printf("ERROR: Failed to receive user option\n");
+            return;
+        }
+
+        if (buffer[0] == '1')
+        { // Sign in
+
+            if (authenticate_user(db, client_socket, username))
+            {
+                handle_user(db, client_socket, username);
+            }
+            else
+            {
+                printf("ERROR: User authentication failed\n");
+            }
+        }
+        else if (buffer[0] == '2')
+        { // Create new
+            handle_new_user(db, client_socket);
+        }
+        else
+        {
+            printf("ERROR: Invalid user option selected: %c\n", buffer[0]);
+        }
     }
     else
     {
@@ -418,24 +644,26 @@ void handle_client(sqlite3 *db, int client_socket)
     }
 }
 
-// threaded 
-void* thread_handle_client(void* arg) {
-    client_args* args = (client_args*)arg;
-    
+// threaded
+void *thread_handle_client(void *arg)
+{
+    client_args *args = (client_args *)arg;
+
     // Detach the thread so its resources are automatically released
     pthread_detach(pthread_self());
-    
+
     // Call the original handle_client function
     handle_client(args->db, args->client_socket);
-    
+
     // Cleanup
     close(args->client_socket);
     free(args);
-    
+
     return NULL;
 }
 
-int main() {
+int main()
+{
     int server_fd, client_socket;
     struct sockaddr_in address;
     struct sockaddr_in client_addr;
@@ -448,13 +676,15 @@ int main() {
     init_database(&db);
 
     // Create socket
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
 
     // Set socket options
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt)))
+    {
         perror("setsockopt");
         exit(EXIT_FAILURE);
     }
@@ -466,7 +696,8 @@ int main() {
     address.sin_port = htons(PORT);
 
     // Bind socket
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+    {
         perror("bind failed");
         close(server_fd);
         sqlite3_close(db);
@@ -474,7 +705,8 @@ int main() {
     }
 
     // Listen for connections
-    if (listen(server_fd, MAX_CLIENTS) < 0) {  // Using MAX_CLIENTS instead of hardcoded 3
+    if (listen(server_fd, MAX_CLIENTS) < 0)
+    { // Using MAX_CLIENTS instead of hardcoded 3
         perror("listen");
         close(server_fd);
         sqlite3_close(db);
@@ -484,7 +716,8 @@ int main() {
     printf("Server listening on port %d\n", PORT);
 
     // Initialize mutex for thread-safe database operations
-    if (pthread_mutex_init(&db_mutex, NULL) != 0) {
+    if (pthread_mutex_init(&db_mutex, NULL) != 0)
+    {
         perror("Mutex initialization failed");
         close(server_fd);
         sqlite3_close(db);
@@ -492,9 +725,11 @@ int main() {
     }
 
     // Main server loop
-    while (1) {
-        client_socket = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
-        if (client_socket < 0) {
+    while (1)
+    {
+        client_socket = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+        if (client_socket < 0)
+        {
             perror("ERROR: Accept failed");
             continue;
         }
@@ -505,18 +740,20 @@ int main() {
         printf("New client connected from %s. Creating thread...\n", client_ip);
 
         // Prepare arguments for the thread
-        client_args* args = malloc(sizeof(client_args));
-        if (args == NULL) {
+        client_args *args = malloc(sizeof(client_args));
+        if (args == NULL)
+        {
             perror("ERROR: Memory allocation failed");
             close(client_socket);
             continue;
         }
-        
+
         args->db = db;
         args->client_socket = client_socket;
 
         // Create new thread for the client
-        if (pthread_create(&thread_id, NULL, thread_handle_client, (void*)args) != 0) {
+        if (pthread_create(&thread_id, NULL, thread_handle_client, (void *)args) != 0)
+        {
             perror("ERROR: Thread creation failed");
             close(client_socket);
             free(args);

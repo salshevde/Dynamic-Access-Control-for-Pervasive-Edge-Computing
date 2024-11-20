@@ -6,11 +6,11 @@
 #include <gmp.h>
 #include <pbc/pbc.h>
 #include <pbc/pbc_random.h>
-#include <pbc/pbc_test.h>
 
 #include <string.h>
 
 #include <openssl/sha.h>
+
 
 //   --------------------------------------------------- Ciphertext - utilities  ---------------------------------------------------
 typedef struct

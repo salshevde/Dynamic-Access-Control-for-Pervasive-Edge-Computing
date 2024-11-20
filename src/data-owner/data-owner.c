@@ -46,10 +46,7 @@
 //     return 0;
 // }
 
-// data_owner.c
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -61,7 +58,97 @@
 #define MAX_USERNAME 64
 #define MAX_PASSWORD 64
 #define SERVER_IP "127.0.0.1"
+// Parameter Handling: NOT COMPLETE
+// void save_params(const char *filename, pairing_t pairing, element_t g, element_t *g_values, int n) {
+//     FILE *fptr = fopen(filename, "wb");
+//     if (!fptr) {
+//         perror("Failed to open file for writing");
+//         exit(1);
+//     }
 
+//     // Write the pairing to the file
+//     if (!pairing_is_symmetric(pairing)) {
+//         printf("Pairing is not symmetric.\n");
+//         fclose(fptr);
+//         return;
+//     }
+//     pbc_param_t param;
+//     pbc_param_init_set_pairing(param, pairing);
+//     pbc_param_out_str(fptr, param);
+//     pbc_param_clear(param);
+
+//     // Write g to the file
+//     element_out_str(fptr, 10, g);
+
+//     // Write g_values to the file
+//     for (int i = 0; i < 2 * n; i++) {
+//         element_out_str(fptr, 10, g_values[i]);
+//     }
+
+//     fclose(fptr);
+// }
+
+// void load_public_params(const char *filename, pairing_t *pairing, element_t *g, element_t *g_values, int n) {
+//     FILE *fptr = fopen(filename, "rb");
+//     if (!fptr) {
+//         perror("Failed to open file for reading");
+//         exit(1);
+//     }
+
+//     // Load the pairing from the file
+//     char param_buffer[2048]; // Adjust size as necessary
+//     size_t count = fread(param_buffer, 1, sizeof(param_buffer), fptr);
+//     if (count == 0) {
+//         perror("Failed to read parameter data");
+//         fclose(fptr);
+//         exit(1);
+//     }
+//     pairing_init_set_buf(*pairing, param_buffer, count);
+
+//     // Load g from the file
+//     element_init_G1(*g, *pairing);
+//     element_from_bytes_compressed(*g, param_buffer); // Adjust buffer handling based on format
+
+//     // Load g_values from the file
+//     for (int i = 0; i < 2 * n; i++) {
+//         element_init_G1(g_values[i], *pairing);
+//         element_from_bytes_compressed(g_values[i], param_buffer); // Adjust buffer handling
+//     }
+
+//     fclose(fptr);
+// }
+
+// void load_private_params(const char *filename, pairing_t *pairing, element_t *g, element_t *g_values, int n) {
+//     FILE *fptr = fopen(filename, "rb");
+//     if (!fptr) {
+//         perror("Failed to open file for reading");
+//         exit(1);
+//     }
+
+//     // Load the pairing from the file
+//     char param_buffer[2048]; // Adjust size as necessary
+//     size_t count = fread(param_buffer, 1, sizeof(param_buffer), fptr);
+//     if (count == 0) {
+//         perror("Failed to read parameter data");
+//         fclose(fptr);
+//         exit(1);
+//     }
+//     pairing_init_set_buf(*pairing, param_buffer, count);
+
+//     // Load g from the file
+//     element_init_G1(*g, *pairing);
+//     element_from_bytes_compressed(*g, param_buffer); // Adjust buffer handling based on format
+
+//     // Load g_values from the file
+//     for (int i = 0; i < 2 * n; i++) {
+//         element_init_G1(g_values[i], *pairing);
+//         element_from_bytes_compressed(g_values[i], param_buffer); // Adjust buffer handling
+//     }
+
+//     fclose(fptr);
+// }
+
+// 
 // Helper function to send a message to server
 void send_message(int socket, const char *message) {
     send(socket, message, strlen(message), 0);
@@ -142,7 +229,7 @@ void handle_owner_operations(int sock) {
         input[strcspn(input, "\n")] = 0;
         send_message(sock, input);
         
-        if (input[0] == '4') { // Exit
+        if (input[0] == '5') { // Exit
             break;
         }
         
@@ -192,11 +279,50 @@ void handle_owner_operations(int sock) {
                 receive_message(sock, buffer, sizeof(buffer));
                 break;
             }
+            case '4': { // UpdateSet
+                // printf("Enter params file path: ");
+                // fgets(input, sizeof(input), stdin);
+                // input[strcspn(input, "\n")] = 0;
+                
+                // send_file(sock, input);
+                                
+                                
+                receive_message(sock, buffer, sizeof(buffer));
+                // Send username
+                fgets(input, sizeof(input), stdin);
+                input[strcspn(input, "\n")] = 0;
+                send_message(sock, input);
+                
+                                               
+                                
+                receive_message(sock, buffer, sizeof(buffer));
+                // Send username
+                fgets(input, sizeof(input), stdin);
+                input[strcspn(input, "\n")] = 0;
+                send_message(sock, input);
+
+                // Get update result
+                receive_message(sock, buffer, sizeof(buffer));
+
+                break;
+            }
         }
     }
 }
 
 int main() {
+    // CRYPTOSYSTEM
+    int lambda = 1024, data_classes; // REUSAE
+    int n = data_classes * 2;// REUSAE
+    pbc_param_t param;
+    pairing_t pairing;
+    mpz_t p;
+    element_t g, g_values[n * 2];
+
+    element_t msk[2], mpk, dynK;
+    element_t k_u, pub_u, pub[5];
+
+    // NETWORK
     int sock = 0;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE];
@@ -270,6 +396,11 @@ int main() {
         fgets(input, sizeof(input), stdin);
         input[strcspn(input, "\n")] = 0;
         send_message(sock, input);
+
+        receive_message(sock, buffer, sizeof(buffer));
+        fgets(input, sizeof(input), stdin);
+        input[strcspn(input, "\n")] = 0;
+        send_message(sock, input);
         
         receive_message(sock, buffer, sizeof(buffer));
         printf("Enter params file path: ");
@@ -278,6 +409,25 @@ int main() {
         send_file(sock, input);
         
         receive_message(sock, buffer, sizeof(buffer));
+        if (strstr(buffer, "Error") != NULL) {
+                close(sock);
+                return 0;
+            }
+
+        //  Cryptosystem initialization
+    initialize(
+        lambda,
+        n, data_classes,
+        param,
+        &pairing,
+        &g,
+        g_values);
+
+    gen(pairing,
+        g,
+        msk,
+        &mpk,
+        &dynK);
     }
     
     // Handle owner operations
