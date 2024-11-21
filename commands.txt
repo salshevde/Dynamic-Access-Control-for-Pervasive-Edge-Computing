@@ -3,9 +3,11 @@ gcc -o cloud-storage-server cloud-storage-server.c -lsqlite3 -lpthread
 ./cloud-storage-server
 
 cd src/data-owner
-gcc data-owner.c ../common/crypto.c -o owner -lsqlite3 -lpbc -lssl -lcrypto -lgmp -lpari
+cc data-owner.c ../common/crypto.c ../common/cJSON.c ../common/fileutils.c -o owner -lsqlite3 -lpbc -lssl -lcrypto -lgmp -lpari
 ./owner
 
 cd src/data-user
 gcc data-user.c -o user -lsqlite3
 ./user
+
+gcc test.c -lssl -lgmp -lpbc -lcrypto cJSON.c

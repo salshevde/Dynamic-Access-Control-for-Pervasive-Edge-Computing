@@ -77,8 +77,12 @@ void init_database(sqlite3 **db)
 ssize_t receive_message(int socket, char *buffer, size_t size)
 {
     memset(buffer, 0, size);
-    ssize_t bytes_received = recv(socket, buffer, size - 1, 0);
 
+    // printf("\nwaiting for client.. \n");
+    usleep(10000);
+    ssize_t bytes_received = recv(socket, buffer, size - 1, 0);
+    
+    // printf("%s",buffer);
     if (bytes_received > 0)
     {
         // Remove trailing newline if present
@@ -87,13 +91,21 @@ ssize_t receive_message(int socket, char *buffer, size_t size)
             buffer[bytes_received - 1] = '\0';
         }
     }
-
+    else{
+        close(socket);
+        return -1;
+    }
     return bytes_received;
 }
 
 // Helper function to safely send messages
 ssize_t send_message(int socket, const char *message)
 {
+
+    // printf("\nsending client.. \n");
+    usleep(10000);
+    // printf("\nsending for user %s\n",message);
+
     return send(socket, message, strlen(message), 0);
 }
 // Receive file data with size prefix
@@ -102,13 +114,16 @@ char *receive_file_data(int socket, int *size)
     char size_str[32];
     receive_message(socket, size_str, sizeof(size_str));
     *size = atoi(size_str);
-
+    if (*size == 0)
+        return NULL;
     send_message(socket, "Ready");
 
     char *data = malloc(*size);
     int total = 0, received;
     while (total < *size)
     {
+        usleep(10000);
+
         received = recv(socket, data + total, *size - total, 0);
         if (received <= 0)
             break;
@@ -130,6 +145,8 @@ void send_file_data(int socket, const char *data, int size)
     int total = 0, sent;
     while (total < size)
     {
+        usleep(10000);
+
         sent = send(socket, data + total, size - total, 0);
         if (sent <= 0)
             break;
@@ -224,6 +241,8 @@ int authenticate_user(sqlite3 *db, int client_socket, char *username)
         else
         {
             send_message(client_socket, "Authentication failed. Disconnecting.\n");
+            close(client_socket);
+            break;
         }
     }
 
@@ -238,13 +257,13 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
     char data_class_str[16];
 
     int data_class;
+    ssize_t sock_status=1;
 
-    while (1)
+    while (sock_status>0)
     {
 
-        send_message(client_socket, "Choose operation (1: Upload, 2: Delete, 3: Update Params, 4: Update Set, 5: View My File. 6: Exit): ");
-        receive_message(client_socket, buffer, sizeof(buffer));
-
+        send_message(client_socket, "Choose operation (1: Upload, 2: Delete, 3: Update Params, 4: Update Set, 5: View My File. 6: Connect with a User, 7: Exit): ");
+        sock_status= receive_message(client_socket, buffer, sizeof(buffer));
         if (buffer[0] == '1')
         { // Upload
             send_message(client_socket, "Filename: ");
@@ -301,29 +320,34 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             {
                 send_message(client_socket, "File not found.\n");
             }
-            send_message(client_socket, "\n"); // DEBUG
         }
         else if (buffer[0] == '3')
         { // Update params
             int size;
             char *params_data = receive_file_data(client_socket, &size);
 
-            sqlite3_stmt *stmt;
-            const char *sql = "UPDATE owners SET public_params = ? WHERE username = ?";
-            sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-            sqlite3_bind_blob(stmt, 1, params_data, size, SQLITE_STATIC);
-            sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
-
-            if (sqlite3_step(stmt) != SQLITE_DONE)
+            if (size == 0)
             {
-                send_message(client_socket, "Error updating params.\n");
+                send_message(client_socket, "Params NOT updated.\n");
             }
-            else
-            {
-                send_message(client_socket, "Params updated successfully.\n");
-            }
+            else {
+                sqlite3_stmt *stmt;
+                const char *sql = "UPDATE owners SET public_params = ? WHERE username = ?";
+                sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+                sqlite3_bind_blob(stmt, 1, params_data, size, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
 
+                if (sqlite3_step(stmt) != SQLITE_DONE)
+                {
+                    send_message(client_socket, "Error updating params.\n");
+                }
+                else
+                {
+                    send_message(client_socket, "Params updated successfully.\n");
+                }
+                
             sqlite3_finalize(stmt);
+            }
             free(params_data);
         }
         else if (buffer[0] == '4')
@@ -356,6 +380,8 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
 
             if (sqlite3_step(stmt) == SQLITE_ROW)
             {
+                send_message(client_socket, "UPDATING USER ACCESS");
+
                 // Update existing row
                 const char *existing_classes = (const char *)sqlite3_column_text(stmt, 0);
                 char updated_classes[BUFFER_SIZE];
@@ -406,6 +432,7 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             }
             else
             {
+                send_message(client_socket, "NEW USER");
                 // Insert a new row
                 const char *insert_sql = "INSERT INTO auth_u (username, ownername, data_classes) VALUES (?, ?, ?)";
                 sqlite3_prepare_v2(db, insert_sql, -1, &stmt, 0);
@@ -422,6 +449,7 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
                     send_message(client_socket, "Error adding new entry.\n");
                 }
             }
+            send_message(client_socket, "Done with updates.\n");
         }
         else if (buffer[0] == '5')
         {
@@ -448,6 +476,12 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             sqlite3_finalize(stmt);
         }
         else if (buffer[0] == '6')
+        {
+            printf("clients talking through direct comms");
+
+            receive_message(client_socket, buffer, sizeof(buffer)); // receive end of direct communication
+        }
+        else if (buffer[0] == '7')
         { // Exit
             break;
         }
@@ -458,32 +492,58 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
 void handle_user(sqlite3 *db, int client_socket, const char *username)
 {
     char owner[MAX_USERNAME];
+    char buffer[BUFFER_SIZE];
+
     char filename[MAX_FILENAME];
 
-    send_message(client_socket, "Enter owner username: ");
-    receive_message(client_socket, owner, sizeof(owner));
+    ssize_t sock_status=1;
 
-    send_message(client_socket, "Enter filename: ");
-    receive_message(client_socket, filename, sizeof(filename));
-
-    sqlite3_stmt *stmt;
-    const char *sql = "SELECT data FROM files WHERE owner = ? AND filename = ?";
-    sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
-    sqlite3_bind_text(stmt, 1, owner, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 2, filename, -1, SQLITE_STATIC);
-    printf("filename");
-    if (sqlite3_step(stmt) == SQLITE_ROW)
+    while (sock_status>0)
     {
-        const void *data = sqlite3_column_blob(stmt, 0);
-        int size = sqlite3_column_bytes(stmt, 0);
-        send_file_data(client_socket, data, size);
-    }
-    else
-    {
-        send_message(client_socket, "0");
-    }
+        send_message(client_socket, "Choose operation (1: Get Data, 2: Connect with a Owner, 3: Exit): ");
+        sock_status= receive_message(client_socket, buffer, sizeof(buffer));
+        if (buffer[0] == '1')
+        {
+            send_message(client_socket, "Enter owner username: ");
+            receive_message(client_socket, owner, sizeof(owner));
 
-    sqlite3_finalize(stmt);
+            send_message(client_socket, "Enter filename: ");
+            receive_message(client_socket, filename, sizeof(filename));
+
+            sqlite3_stmt *stmt;
+            const char *sql = "SELECT data FROM files WHERE owner = ? AND filename = ?";
+            sqlite3_prepare_v2(db, sql, -1, &stmt, 0);
+            sqlite3_bind_text(stmt, 1, owner, -1, SQLITE_STATIC);
+            sqlite3_bind_text(stmt, 2, filename, -1, SQLITE_STATIC);
+            printf("filename");
+            if (sqlite3_step(stmt) == SQLITE_ROW)
+            {
+                const void *data = sqlite3_column_blob(stmt, 0);
+                int size = sqlite3_column_bytes(stmt, 0);
+                send_file_data(client_socket, data, size);
+            }
+            else
+            {
+                send_message(client_socket, "0");
+            }
+
+            sqlite3_finalize(stmt);
+        }
+        else if (buffer[0] == '2')
+        {
+
+            send_message(client_socket, "Enter owner username: ");
+            receive_message(client_socket, owner, sizeof(owner));
+            receive_message(client_socket, owner, sizeof(owner)); // REceive end of direct communication
+
+        }
+
+        else if (buffer[0] == '3')
+        {
+            break;
+        }
+    }
+    
 }
 
 // Handle new registration
@@ -565,9 +625,6 @@ void handle_client(sqlite3 *db, int client_socket)
     char buffer[BUFFER_SIZE];
     char username[MAX_USERNAME];
 
-    // Debug print for entry
-    // printf("DEBUG: Entered handle_client\n");
-
     // Clear buffers to prevent garbage data
     memset(buffer, 0, BUFFER_SIZE);
     memset(username, 0, MAX_USERNAME);
@@ -586,12 +643,8 @@ void handle_client(sqlite3 *db, int client_socket)
         return;
     }
 
-    // printf("DEBUG: Interface selection received: %c\n", buffer[0]);
-
     if (buffer[0] == '1')
     { // Owner
-        // printf("DEBUG: Owner interface selected\n");
-
         if (send_message(client_socket, "1: Sign in, 2: Create new: ") <= 0)
         {
             printf("ERROR: Failed to send owner options\n");
@@ -605,11 +658,8 @@ void handle_client(sqlite3 *db, int client_socket)
             return;
         }
 
-        // printf("DEBUG: Owner option selected: %c\n", buffer[0]);
-
         if (buffer[0] == '1')
         { // Sign in
-            // printf("DEBUG: Owner sign in selected\n");
 
             if (authenticate_owner(db, client_socket, username))
             {
@@ -687,6 +737,7 @@ void *thread_handle_client(void *arg)
     handle_client(args->db, args->client_socket);
 
     // Cleanup
+    printf("\nClosing connection with client");
     close(args->client_socket);
     free(args);
 

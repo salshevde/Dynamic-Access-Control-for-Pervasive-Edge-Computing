@@ -1,177 +1,226 @@
 #include "../common/crypto.h"
-
-#define MAX_USERS 100
-
-//  Mutex for thread-safe
-pthread_mutex_t db_mutex = PTHREAD_MUTEX_INITIALIZER;
-// void encrypt_file()
-// int main(int argc, char argv[])
-// {
-
-//     int lambda = 1024, data_classes = 4;
-//     int n = data_classes * 2;
-//     pbc_param_t param;
-//     pairing_t pairing;
-//     mpz_t p;
-//     element_t g, g_values[n * 2];
-
-//     element_t msk[2], mpk, dynK;
-//     element_t k_u, pub_u, pub[5];
-
-//     //  Cryptosystem initialization
-//     initialize(
-//         lambda,
-//         n, data_classes,
-//         param,
-//         &pairing,
-//         &g,
-//         g_values);
-
-//     gen(pairing,
-//         g,
-//         msk,
-//         &mpk,
-//         &dynK);
-
-//     // Take auth_u input
-//     // int auth_u
-
-//     extract(pairing,
-//         msk,
-//         mpk,
-//         dynK,
-//         g,
-//         auth_u,
-//         g_values,
-//         n, data_classes,
-//         &k_u,
-//         &pub_u, pub);
-
-//     return 0;
-// }
-
+#include "../common/fileutils.h"
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <sqlite3.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
 #define PORT 5000
+#define MAX_USERS 100
+#define DIRECT_COMM_PORT 5001 // Different from main server port
 #define BUFFER_SIZE 1024
-#define MAX_FILENAME 256
 #define MAX_USERNAME 64
 #define MAX_PASSWORD 64
 #define SERVER_IP "127.0.0.1"
-// Parameter Handling: NOT COMPLETE
-void save_params(int lambda, int data_classes, element_t g, element_t k_u, element_t g_values[], element_t msk[2], element_t mpk, element_t dynK, element_t pub_u, element_t pub[])
+
+//  Mutex for thread-safe
+pthread_mutex_t requests_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+//  Direct communication with user
+typedef struct
 {
-    FILE *f_public = fopen("public.param", "w");
-    FILE *f_private = fopen("private.param", "w");
+    char username[64];
+    int socket;
+    int is_active;
+} UserConnection;
+UserConnection connection_requests[MAX_USERS];
+int request_count = 0;
 
-    fprintf(f_private, "\n\ng: ");
-    element_out_str(f_private, 10, g);
+typedef struct
+{
+    int server_fd;
+    char *ownername;
+} owner_args;
 
-    for (int i = 0; i < 4 * data_classes; i++)
+// Function to create a direct communication socket
+void add_connection_request(const char *username, int client_socket)
+{
+    pthread_mutex_lock(&requests_mutex);
+
+    // Check if list is full
+    if (request_count >= MAX_USERS)
     {
-        fprintf(f_private, "\ng_%d: ", i + 1);
-        element_out_str(f_private, 10, g_values[i]);
+        printf("Connection request list is full\n");
+        pthread_mutex_unlock(&requests_mutex);
+        return;
     }
 
-    fprintf(f_private, "\n\nmsk[0] (y1): ");
-    element_out_str(f_private, 10, msk[0]);
-    fprintf(f_private, "\nmsk[1] (y2): ");
-    element_out_str(f_private, 10, msk[1]);
+    // Add new request
+    strncpy(connection_requests[request_count].username, username, 63);
+    connection_requests[request_count].socket = client_socket;
+    connection_requests[request_count].is_active = 1;
+    request_count++;
 
-    fprintf(f_public, "\n\nmpk: ");
-    element_out_str(f_public, 10, mpk);
-
-    fprintf(f_private, "\n\npub_u: ");
-    element_out_str(f_private, 10, pub_u);
-
-    fprintf(f_public, "\n");
-    for (int i = 0; i < 5; i++)
-    {
-        fprintf(f_public, "\npub_%d: ", i + 1);
-        element_out_str(f_public, 10, pub[i]);
-    }
-
-    fprintf(f_public, "\n\nK_u: ");
-    element_out_str(f_public, 10, k_u);
-
-    fprintf(f_public, "\n\ndynK: ");
-    element_out_str(f_public, 10, dynK);
-    fprintf(f_public, "\n");
-    fprintf(f_private, "\n");
-
-    fclose(f_public);
-    fclose(f_private);
+    pthread_mutex_unlock(&requests_mutex);
 }
 
-// void load_public_params(const char *filename, pairing_t *pairing, element_t *g, element_t *g_values, int n) {
-//     FILE *fptr = fopen(filename, "rb");
-//     if (!fptr) {
-//         perror("Failed to open file for reading");
-//         exit(1);
-//     }
-
-//     // Load the pairing from the file
-//     char param_buffer[2048]; // Adjust size as necessary
-//     size_t count = fread(param_buffer, 1, sizeof(param_buffer), fptr);
-//     if (count == 0) {
-//         perror("Failed to read parameter data");
-//         fclose(fptr);
-//         exit(1);
-//     }
-//     pairing_init_set_buf(*pairing, param_buffer, count);
-
-//     // Load g from the file
-//     element_init_G1(*g, *pairing);
-//     element_from_bytes_compressed(*g, param_buffer); // Adjust buffer handling based on format
-
-//     // Load g_values from the file
-//     for (int i = 0; i < 2 * n; i++) {
-//         element_init_G1(g_values[i], *pairing);
-//         element_from_bytes_compressed(g_values[i], param_buffer); // Adjust buffer handling
-//     }
-
-//     fclose(fptr);
-// }
-
-// void load_private_params(const char *filename, pairing_t *pairing, element_t *g, element_t *g_values, int n) {
-//     FILE *fptr = fopen(filename, "rb");
-//     if (!fptr) {
-//         perror("Failed to open file for reading");
-//         exit(1);
-//     }
-
-//     // Load the pairing from the file
-//     char param_buffer[2048]; // Adjust size as necessary
-//     size_t count = fread(param_buffer, 1, sizeof(param_buffer), fptr);
-//     if (count == 0) {
-//         perror("Failed to read parameter data");
-//         fclose(fptr);
-//         exit(1);
-//     }
-//     pairing_init_set_buf(*pairing, param_buffer, count);
-
-//     // Load g from the file
-//     element_init_G1(*g, *pairing);
-//     element_from_bytes_compressed(*g, param_buffer); // Adjust buffer handling based on format
-
-//     // Load g_values from the file
-//     for (int i = 0; i < 2 * n; i++) {
-//         element_init_G1(g_values[i], *pairing);
-//         element_from_bytes_compressed(g_values[i], param_buffer); // Adjust buffer handling
-//     }
-
-//     fclose(fptr);
-// }
-
-//
-// Helper function to send a message to server
-void send_message(int socket, const char *message)
+int choose_connection_request()
 {
-    send(socket, message, strlen(message), 0);
+    int choice;
+
+    // Display available connection requests
+    printf("Available Connection Requests:\n");
+    for (int i = 0; i < request_count; i++)
+    {
+        if (connection_requests[i].is_active)
+        {
+            printf("%d. %s\n", i + 1, connection_requests[i].username);
+        }
+    }
+
+    // Get user choice
+    printf("Enter the number of the user to connect (0 to refresh, -1 to exit): ");
+    scanf("%d", &choice);
+
+    if (choice < -1 || choice > request_count || (choice > 0 && !connection_requests[choice - 1].is_active))
+    {
+        printf("Invalid selection\n");
+        return -3;
+    }
+
+    if (choice == 0)
+    {
+        return -2;
+    }
+    if (choice == -1)
+    {
+        return -1;
+    }
+
+    choice--;
+    // Return socket of selected user
+    return choice;
+}
+
+int setup_direct_communication_listener()
+{
+    int server_fd;
+    struct sockaddr_in address;
+    int opt = 1;
+
+    // Create socket
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    {
+        perror("Direct communication server socket creation failed");
+        return -1;
+    }
+
+    // Allow socket to reuse address
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
+                   &opt, sizeof(opt)))
+    {
+        perror("Direct communication setsockopt failed");
+        return -1;
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(DIRECT_COMM_PORT);
+
+    // Bind the socket
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+    {
+        perror("Direct communication bind failed");
+        return -1;
+    }
+
+    // Listen for connections
+    if (listen(server_fd, MAX_USERS) < 0)
+    {
+        perror("Direct communication listen failed");
+        return -1;
+    }
+
+    printf("Waiting for direct communication requests...\n");
+    return server_fd;
+}
+
+void *handle_connection_requests(void *arg)
+{
+    owner_args *args = (owner_args *)arg;
+
+    int server_fd = args->server_fd;
+    char *ownername = args->ownername;
+    struct sockaddr_in client_address;
+    socklen_t client_addrlen = sizeof(client_address);
+
+    while (1)
+    {
+        printf("running");
+        // Accept incoming connection
+        int client_socket = accept(server_fd,
+                                   (struct sockaddr *)&client_address,
+                                   &client_addrlen);
+        if (client_socket < 0)
+        {
+            perror("Connection accept failed");
+            continue;
+        }
+
+        // Get username (you might want to implement a more robust method)
+        char username[64];
+        memset(username, 0, sizeof(username));
+        char cmp[2] = {0};
+        ssize_t bytes_received = recv(client_socket, username, sizeof(username) - 1, 0);
+
+        printf("Found user %s", username);
+        if (bytes_received < 0)
+        {
+            perror("Error receiving username");
+            close(client_socket);
+            continue;
+        }
+
+        printf("sending name %s", ownername);
+
+        send(client_socket, ownername, strlen(ownername), 0);
+
+        recv(client_socket, cmp, sizeof(cmp) - 1, 0);
+
+        if (strcmp(cmp, "1") == 0)
+        {
+            printf("User added");
+
+            // Add to connection requests
+            add_connection_request(username, client_socket);
+        }
+        else
+        {
+            printf("User not right");
+
+            close(client_socket);
+        }
+    }
+}
+// ENCRYPTION
+// Parameter Handling: NOT COMPLETE
+
+// Helper function to receive a message from server
+
+ssize_t receive_message(int socket, char *buffer, size_t size)
+{
+    memset(buffer, 0, size);
+
+    printf("\nwaiting for server.. \n");
+    usleep(10000);
+    ssize_t bytes_received = recv(socket, buffer, size - 1, 0);
+
+    printf("\n%s\n", buffer);
+    return bytes_received;
+}
+
+// Helper function to safely send messages
+ssize_t send_message(int socket, const char *message)
+{
+    printf("\nsending server.. \n");
+    usleep(10000);
+
+    return send(socket, message, strlen(message), 0);
 }
 
 int check_socket_status(int socket)
@@ -194,16 +243,9 @@ int check_socket_status(int socket)
 
     return 0;
 }
-// Helper function to receive a message from server
-void receive_message(int socket, char *buffer, int size)
-{
-    memset(buffer, 0, size);
-    recv(socket, buffer, size - 1, 0);
-    printf("%s", buffer);
-}
 
 // Function to send a file to server
-void send_file(int socket, const char *filepath)
+void send_public_file(int socket, const char *filepath)
 {
     FILE *file = fopen(filepath, "rb");
     if (!file)
@@ -233,6 +275,8 @@ void send_file(int socket, const char *filepath)
     int total = 0, sent;
     while (total < size)
     {
+        usleep(10000);
+
         sent = send(socket, data + total, size - total, 0);
         if (sent <= 0)
             break;
@@ -240,6 +284,54 @@ void send_file(int socket, const char *filepath)
     }
 
     free(data);
+    fclose(file);
+}
+void send_private_file(int socket, const char *filepath, int data_class,
+                       int n, int data_classes,
+                       element_t mpk,
+                       element_t g,
+                       element_t g_values[],
+                       pairing_t pairing,
+                       element_t dynK)
+{
+    FILE *file = fopen(filepath, "rb");
+    if (!file)
+    {
+        printf("Error opening file: %s\n", filepath);
+        send_message(socket, "0");
+        return;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    unsigned char *pt_buffer = (unsigned char *)malloc(size);
+    fread(pt_buffer, 1, size, file);
+    const SerializedCiphertext *ciphertext = enc(data_class, n, data_classes, mpk, g, g_values, pairing, dynK, pt_buffer);
+
+    // Send size
+    char size_str[32];
+    sprintf(size_str, "%ld", ciphertext->total_length);
+    send_message(socket, size_str);
+
+    // Wait for server ready signal
+    char buffer[BUFFER_SIZE];
+    receive_message(socket, buffer, sizeof(buffer));
+    printf("%ld",ciphertext->total_length);
+
+    // Send file content
+    int total = 0, sent;
+    while (total < ciphertext->total_length)
+    {
+        sent = send(socket, ciphertext->buffer + total, ciphertext->total_length - total, 0);
+        if (sent <= 0)
+            break;
+        total += sent;
+    }
+
+printf("here");
+    free(pt_buffer);
     fclose(file);
 }
 
@@ -271,6 +363,8 @@ void receive_file(int socket, const char *filepath)
     int total = 0, received;
     while (total < size)
     {
+        usleep(10000);
+
         received = recv(socket, data + total, size - total, 0);
         if (received <= 0)
             break;
@@ -284,11 +378,24 @@ void receive_file(int socket, const char *filepath)
     printf("File saved successfully to: %s\n", filepath);
 }
 
+
 // Function to handle owner operations
-void handle_owner_operations(int sock)
+void handle_owner_operations(int sock, char *ownername,
+                             int n, int data_classes,
+                             element_t msk[],
+                             element_t mpk,
+                             element_t g,
+                             element_t g_values[],
+                             pairing_t pairing,
+                             element_t dynK)
 {
     char buffer[BUFFER_SIZE];
     char input[BUFFER_SIZE];
+    char username[MAX_USERNAME];
+    char data_class_str[16];
+    int data_class;
+    int server_fd;
+    pthread_t request_thread;
 
     while (1)
     {
@@ -300,7 +407,7 @@ void handle_owner_operations(int sock)
         input[strcspn(input, "\n")] = 0;
         send_message(sock, input);
 
-        if (input[0] == '6')
+        if (input[0] == '7')
         { // Exit
             break;
         }
@@ -321,17 +428,18 @@ void handle_owner_operations(int sock)
             receive_message(sock, buffer, sizeof(buffer));
 
             // Send Data Class
-            fgets(input, sizeof(input), stdin);
-            input[strcspn(input, "\n")] = 0;
-            send_message(sock, input);
-
+            fgets(data_class_str, sizeof(data_class_str), stdin);
+            data_class_str[strcspn(data_class_str, "\n")] = 0;
+            send_message(sock, data_class_str);
+            data_class = atoi(data_class_str);
             // Get local file path
             printf("Enter local file path: ");
             fgets(input, sizeof(input), stdin);
             input[strcspn(input, "\n")] = 0;
 
             // Send file
-            send_file(sock, input);
+            // send_public_file(sock,input);
+            send_private_file(sock, input, data_class, n, data_classes, mpk, g, g_values, pairing, dynK);
 
             // Get upload result
             receive_message(sock, buffer, sizeof(buffer));
@@ -357,7 +465,7 @@ void handle_owner_operations(int sock)
             fgets(input, sizeof(input), stdin);
             input[strcspn(input, "\n")] = 0;
 
-            send_file(sock, input);
+            send_public_file(sock, input);
 
             // Get update result
             receive_message(sock, buffer, sizeof(buffer));
@@ -373,17 +481,65 @@ void handle_owner_operations(int sock)
 
             receive_message(sock, buffer, sizeof(buffer));
             // Send username
-            fgets(input, sizeof(input), stdin);
-            input[strcspn(input, "\n")] = 0;
-            send_message(sock, input);
+            fgets(username, sizeof(username), stdin);
+            username[strcspn(username, "\n")] = 0;
+            send_message(sock, username);
 
             receive_message(sock, buffer, sizeof(buffer));
-            // Send username
+            // REvoke /ADD?
             fgets(input, sizeof(input), stdin);
             input[strcspn(input, "\n")] = 0;
             send_message(sock, input);
 
-            // Get update result
+            // Get update result : IF NEW -> transmit K_u
+            receive_message(sock, buffer, sizeof(buffer));
+            // check if invalid
+            if (strstr(buffer, "Invalid") != NULL)
+            {
+                break;
+            }
+            else if (strstr(buffer, "UPDATING") != NULL)
+            {
+                receive_message(sock, buffer, sizeof(buffer));
+            }
+            else if (strncmp("NEW USER", buffer, 8) == 0)
+            {
+                // Setup direct communication listener
+                server_fd = setup_direct_communication_listener();
+                if (server_fd < 0)
+                {
+                    break;
+                }
+                owner_args arg;
+                arg.ownername = ownername;
+                arg.server_fd = server_fd;
+                if (pthread_create(&request_thread, NULL, handle_connection_requests, &arg) != 0)
+                {
+                    perror("Failed to create request handling thread");
+                    break;
+                }
+                int selected_socket;
+                do
+                {
+                    selected_socket = choose_connection_request();
+                    if (selected_socket == -1)
+                    {
+                        printf("\nUser Not online!!\n");
+                        break;
+                    }
+                    if (selected_socket >= 0)
+                    {
+                        UserConnection user = connection_requests[selected_socket];
+
+                        printf("\nConnected to %s\n", user.username);
+
+                        close(selected_socket);
+                    }
+                } while (selected_socket == -2);
+
+                printf("Ending direct communication...");
+                send_message(sock, "Direct Communication Over!");
+            }
             receive_message(sock, buffer, sizeof(buffer));
 
             break;
@@ -405,33 +561,59 @@ void handle_owner_operations(int sock)
             receive_file(sock, input);
             break;
         }
+        case '6':
+        {
+            // Setup direct communication listener
+            server_fd = setup_direct_communication_listener();
+            if (server_fd < 0)
+            {
+                break;
+            }
+
+            if (pthread_create(&request_thread, NULL, handle_connection_requests, &server_fd) != 0)
+            {
+                perror("Failed to create request handling thread");
+                break;
+            }
+
+            while (1)
+            {
+                int selected_socket = choose_connection_request();
+                printf("%d", selected_socket);
+                if (selected_socket == -1)
+                {
+                    printf("Ending direct communication...");
+                    send_message(sock, "Direct Communication Over!");
+                    break;
+                }
+                if (selected_socket == -2)
+                    continue;
+
+                if (selected_socket >= 0)
+                {
+
+                    // Perform communication with selected user
+                    send_message(selected_socket, ownername);
+                    receive_message(selected_socket, buffer, sizeof(buffer)); // while it
+
+                    close(selected_socket);
+                }
+            }
+            printf("Ending direct communication...");
+            send_message(sock, "Direct Communication Over!");
+            pthread_join(request_thread, NULL);
+
+            break;
+        }
         }
     }
-}
-
-// threaded UPDATE PLS
-void *thread_handle(void *arg)
-{
-    client_args *args = (client_args *)arg;
-
-    // Detach the thread so its resources are automatically released
-    pthread_detach(pthread_self());
-
-    // Call the original handle_client function
-    handle_client(args->db, args->client_socket);
-
-    // Cleanup
-    close(args->client_socket);
-    free(args);
-
-    return NULL;
 }
 
 int main()
 {
     // CRYPTOSYSTEM
-    int lambda = 1024, data_classes; // REUSAE
-    int n = data_classes * 2;        // REUSAE
+    int lambda = 1024, data_classes = 5; // REUSAE
+    int n = data_classes * 2;            // REUSAE
     pbc_param_t param;
     pairing_t pairing;
     mpz_t p;
@@ -441,9 +623,11 @@ int main()
     element_t k_u, pub_u, pub[5];
 
     // NETWORK
+
     int sock = 0;
     struct sockaddr_in serv_addr;
     char buffer[BUFFER_SIZE];
+    char ownername[MAX_USERNAME];
     char input[BUFFER_SIZE];
 
     // Create socket
@@ -484,9 +668,9 @@ int main()
     { // Sign in
         // Handle username/password
         receive_message(sock, buffer, sizeof(buffer));
-        fgets(input, sizeof(input), stdin);
-        input[strcspn(input, "\n")] = 0;
-        send_message(sock, input);
+        fgets(ownername, sizeof(ownername), stdin);
+        ownername[strcspn(ownername, "\n")] = 0;
+        send_message(sock, ownername);
 
         receive_message(sock, buffer, sizeof(buffer));
         fgets(input, sizeof(input), stdin);
@@ -497,6 +681,8 @@ int main()
         receive_message(sock, buffer, sizeof(buffer));
         if (strstr(buffer, "Incorrect password") != NULL)
         {
+            receive_message(sock, buffer, sizeof(buffer));
+
             fgets(input, sizeof(input), stdin);
             input[strcspn(input, "\n")] = 0;
             send_message(sock, input);
@@ -508,6 +694,9 @@ int main()
                 return 0;
             }
         }
+        // Load existing cryptosystem
+        load_public_params("./params/public.param", &lambda, &data_classes, &n, &pairing, &g, g_values, &mpk, &dynK);
+        load_private_params("./params/private.param", msk, pairing);
     }
     else if (input[0] == '2')
     { // Create new account
@@ -531,20 +720,20 @@ int main()
         printf("Enter params file path: ");
         fgets(input, sizeof(input), stdin);
         input[strcspn(input, "\n")] = 0;
-        send_file(sock, input);
+        send_public_file(sock, input);
 
         receive_message(sock, buffer, sizeof(buffer));
         if (strstr(buffer, "Error") != NULL)
         {
             close(sock);
-            return 0;
+            exit(1);
         }
 
         //  Cryptosystem initialization
         initialize(
             lambda,
             n, data_classes,
-            param,
+            &param,
             &pairing,
             &g,
             g_values);
@@ -554,10 +743,13 @@ int main()
             msk,
             &mpk,
             &dynK);
+
+        save_private_params("./params/private.param", msk);
+        save_public_params("./params/public.param", lambda, data_classes, n, param, g, g_values, mpk, dynK);
     }
 
     // Handle owner operations
-    handle_owner_operations(sock);
+    handle_owner_operations(sock, ownername, n, data_classes, msk, mpk, g, g_values, pairing, dynK);
 
     close(sock);
     return 0;

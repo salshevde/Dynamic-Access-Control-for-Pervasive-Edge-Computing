@@ -1,6 +1,7 @@
 # Prerequisites
 *.d
-
+*.txt
+*.param
 # Object files
 *.o
 *.ko

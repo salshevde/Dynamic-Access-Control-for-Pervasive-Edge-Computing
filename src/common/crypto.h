@@ -11,6 +11,13 @@
 
 #include <openssl/sha.h>
 
+//   --------------------------------------------------- utility Functions  ---------------------------------------------------
+
+unsigned char *element_to_bytes_array(element_t e);
+
+unsigned char *element_to_hash(element_t e);
+
+void element_to_hash_element(element_t e, element_t *h, pairing_t pairing);
 
 //   --------------------------------------------------- Ciphertext - utilities  ---------------------------------------------------
 typedef struct
@@ -57,7 +64,7 @@ void free_ciphertext(Ciphertext *ct);
 
 // Functions
 void initialize(int lambda, int n, int data_classes,
-                pbc_param_t param,
+                pbc_param_t *param,
                 pairing_t *pairing,
                 element_t *g,
                 element_t g_values[]);
@@ -104,10 +111,9 @@ void extract(pairing_t pairing,
 
 const SerializedCiphertext *enc(int data_class,
                                 int n, int data_classes,
-                                element_t msk[],
                                 element_t mpk,
                                 element_t g,
-                                element_t g_values[], int auth[],
+                                element_t g_values[],
                                 pairing_t pairing,
                                 element_t dynK,
                                 unsigned char *plaintext);

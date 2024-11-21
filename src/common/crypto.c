@@ -164,7 +164,6 @@ SerializedCiphertext *serialize_ciphertext(const Ciphertext *ct)
 
     memcpy(data_ptr, ct->C1.data, c1_len);
     data_ptr += c1_len;
-
     memcpy(data_ptr, ct->C2.data, c2_len);
     data_ptr += c2_len;
 
@@ -256,49 +255,46 @@ void free_ciphertext(Ciphertext *ct)
 //   --------------------------------------------------- Initialize   ---------------------------------------------------
 
 void initialize(int lambda, int n, int data_classes,
-                pbc_param_t param,
+                pbc_param_t *param,
                 pairing_t *pairing,
                 element_t *g,
                 element_t g_values[])
 {
 
-    // FILE based params [comment if using custom]
-    FILE *fptr = fopen("./params/a.param", "r");
-    if (!fptr)
-    {
-        perror("Failed to open parameter file");
-        exit(1);
-    }
+    // // FILE based params [comment if using custom]
+    // FILE *fptr = fopen("./params/a.param", "r");
+    // if (!fptr)
+    // {
+    //     perror("Failed to open parameter file");
+    //     exit(1);
+    // }
 
-    fseek(fptr, 0, SEEK_END);
-    long file_size = ftell(fptr);
-    fseek(fptr, 0, SEEK_SET);
+    // fseek(fptr, 0, SEEK_END);
+    // long file_size = ftell(fptr);
+    // fseek(fptr, 0, SEEK_SET);
 
-    char *buffer = (char *)malloc(file_size);
-    if (!buffer)
-    {
-        printf("Memory allocation failed");
-        exit(1);
-    }
+    // char *buffer = (char *)malloc(file_size);
+    // if (!buffer)
+    // {
+    //     printf("Memory allocation failed");
+    //     exit(1);
+    // }
 
-    fread(buffer, 1, file_size, fptr);
+    // fread(buffer, 1, file_size, fptr);
 
-    fclose(fptr);
+    // fclose(fptr);
 
-    // Select bilinear groups G1 and GT
-    pairing_init_set_buf(*pairing, buffer, file_size);
+    // // Select bilinear groups G1 and GT
+    // pairing_init_set_buf(*pairing, buffer, file_size);
 
     // CUSTOM Parameter Generation [uncomment as an alternative for file based params]
-    // int rbits = lambda, qbits = 2 * lambda;
+    int rbits = lambda, qbits = 2 * lambda;
 
-    // pbc_param_init_a_gen(param, rbits, qbits);
-    // pbc_param_out_str(stdout, param); //FADDITIONAL:Add to file
-
-    // pbc_param_out_str(stdout, param); //FADDITIONAL:Add to file
-    //     pbc_param_clear(param);
+    pbc_param_init_a_gen(*param, rbits, qbits);
+     //   pbc_param_clear(param);
 
     // Select bilinear groups G1 and GT
-    // pairing_init_pbc_param(*pairing, param); // with prime order p : 2^λ ≤p ≤ 2^λ+1
+    pairing_init_pbc_param(*pairing, *param); // with prime order p : 2^λ ≤p ≤ 2^λ+1
 
     element_t a;
     // a generator g ∈ G1 at random
@@ -570,10 +566,9 @@ void extract(pairing_t pairing,
 
 const SerializedCiphertext *enc(int data_class,
                                 int n, int data_classes,
-                                element_t msk[],
                                 element_t mpk,
                                 element_t g,
-                                element_t g_values[], int auth[],
+                                element_t g_values[],
                                 pairing_t pairing,
                                 element_t dynK,
                                 unsigned char *plaintext)
@@ -862,8 +857,6 @@ unsigned char *dec(int n, int data_classes,
     return M;
 }
 //   --------------------------------------------------- UpdateSet   ---------------------------------------------------
-// void updateSet(int data_class, int auth[],int type,pairing_t pairing ,element_t g, element_t *dynk, element_t msk[], element_t mpk, ){
-//     auth[data_class] = type==0?0:1; // update authorized set
 
 void updateSet(int data_class, int n, int data_classes, int auth[], int type, element_t *dynK, element_t msk[], element_t pub_u, element_t pub[], element_t mpk, element_t g, element_t g_values[], pairing_t pairing)
 {
@@ -880,134 +873,3 @@ void updateSet(int data_class, int n, int data_classes, int auth[], int type, el
     element_clear(y2_);
 }
 //   --------------------------------------------------- File Utils   ---------------------------------------------------
-
-//   --------------------------------------------------- MAIN   ---------------------------------------------------
-// int main()
-// {
-//     //  Parameters: Modify Acc to user needs
-//     int lambda = 1024, data_classes = 4, data_class = 2, data_class_auth = 0;
-
-//     int auth_u[] = {0, 1, 1, 0}, n = data_classes * 2; // data class group to be authorized
-
-//     unsigned char *plaintext = "this is a message in transmission ", *message;
-
-//     // Variable init
-
-//     pbc_param_t param;
-//     pairing_t pairing;
-//     mpz_t p;
-//     element_t g, g_values[n * 2];
-
-//     element_t msk[2], mpk, dynK;
-//     element_t k_u, pub_u, pub[5];
-
-//     //  INITIALIZATION
-    // initialize(
-    //     lambda,
-    //     n, data_classes,
-    //     param,
-    //     &pairing,
-    //     &g,
-    //     // H, // placeholder
-    //     g_values);
-
-//     //  GENERATION
-    // gen(pairing,
-    //     g,
-    //     msk,
-    //     &mpk,
-    //     &dynK);
-
-    // // EXTRACT
-
-    // extract(pairing,
-    //         msk,
-    //         mpk,
-    //         dynK,
-    //         g,
-    //         auth_u,
-    //         g_values,
-    //         n, data_classes,
-    //         &k_u,
-    //         &pub_u, pub);
-
-//     //  ENCRYPTION
-//     const SerializedCiphertext *ciphertext = enc(data_class, n, data_classes, msk, mpk, g, g_values, auth_u, pairing, dynK, plaintext);
-//     // {
-//     //     printf("encryption unsuccessful!");
-//     //     return 0;
-//     // }
-//     // DECRYPTION
-
-//     //  DECRYPTION WITH ACCESS
-//     unsigned char *decryption = dec(n, data_classes,
-//                                     data_class,
-//                                     k_u,
-//                                     pub,
-//                                     auth_u,
-//                                     g_values,
-//                                     pairing,
-//                                     ciphertext);
-//     int cipher_len = strlen(plaintext);
-//     printf("\nDecryption of data_class%d with ACCESS: ", data_class);
-//     for (int i = 0; i < cipher_len; i++)
-//     {
-//         printf("%c", decryption[i]);
-//     }
-
-//     //  UPDATE SET
-//     updateSet(data_class, n, data_classes, auth_u, 0, &dynK, msk, pub_u, pub, mpk, g, g_values, pairing);
-//     const SerializedCiphertext *new_ciphertext = enc(data_class, n, data_classes, msk, mpk, g, g_values, auth_u, pairing, dynK, plaintext);
-//     decryption = dec(n, data_classes,
-//                      data_class,
-//                      k_u,
-//                      pub,
-//                      auth_u,
-//                      g_values,
-//                      pairing,
-//                      new_ciphertext);
-//     cipher_len = strlen(plaintext);
-//     printf("\nDecryption of data class %d  with ACCESS granted: ", data_class);
-//     for (int i = 0; i < cipher_len; i++)
-//     {
-//         printf("%c", decryption[i]);
-//     }
-
-//         updateSet(data_class, n, data_classes, auth_u, 1, &dynK, msk, pub_u, pub, mpk, g, g_values, pairing);
-//     const SerializedCiphertext *new_new_ciphertext = enc(data_class, n, data_classes, msk, mpk, g, g_values, auth_u, pairing, dynK, plaintext);
-//     decryption = dec(n, data_classes,
-//                      data_class,
-//                      k_u,
-//                      pub,
-//                      auth_u,
-//                      g_values,
-//                      pairing,
-//                      new_new_ciphertext);
-//     cipher_len = strlen(plaintext);
-//     printf("\nDecryption of data class %d  with ACCESS granted: ", data_class);
-//     for (int i = 0; i < cipher_len; i++)
-//     {
-//         printf("%c", decryption[i]);
-//     }
-
-//     // Clean up
-//     element_clear(g);
-
-//     for (int i = 0; i < data_classes * 4; i++)
-//     {
-//         element_clear(g_values[i]);
-//     }
-//     element_clear(msk[0]);
-//     element_clear(msk[1]);
-//     element_clear(mpk);
-//     element_clear(dynK);
-//     element_clear(k_u);
-//     element_clear(pub_u);
-//     for (int i = 0; i < 5; i++)
-//     {
-//         element_clear(pub[i]);
-//     }
-
-//     pairing_clear(pairing);
-//     return 0;
-// }
