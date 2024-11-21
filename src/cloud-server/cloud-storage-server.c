@@ -58,6 +58,7 @@ void init_database(sqlite3 **db)
                 "username TEXT,"
                 "ownername TEXT,"
                 "data_classes TEXT,"
+                "pub_u BLOB,"
                 "PRIMARY KEY (username, ownername),"
                 "FOREIGN KEY (username) REFERENCES users(username) ON DELETE CASCADE,"
                 "FOREIGN KEY (ownername) REFERENCES owners(username) ON DELETE CASCADE"
@@ -132,6 +133,40 @@ char *receive_file_data(int socket, int *size)
     return data;
 }
 
+void send_auth_u(sqlite3 *db, int socket,const char* username,const char* ownername) {
+    usleep(10000);  // Optional sleep for timing purposes
+    send_message(socket,"auth_u: ");
+    sqlite3_stmt *stmt;
+    const char *check_sql = "SELECT data_classes FROM auth_u WHERE username = ? AND ownername = ?";
+
+    if (sqlite3_prepare_v2(db, check_sql, -1, &stmt, 0) != SQLITE_OK) {
+
+        int error_code = -1;
+        send(socket, &error_code, sizeof(error_code), 0);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, ownername, -1, SQLITE_STATIC);
+
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        const char *data_classes = (const char *)sqlite3_column_text(stmt, 0);
+        
+        if (data_classes) {
+            send(socket, data_classes, strlen(data_classes), 0);
+        } else {
+            int error_code = -1;
+            send(socket, &error_code, sizeof(error_code), 0);
+        }
+    } else {
+        int error_code = -1;
+        send(socket, &error_code, sizeof(error_code), 0);
+    }
+
+    sqlite3_finalize(stmt);
+}
+
 // Send file data with size prefix
 void send_file_data(int socket, const char *data, int size)
 {
@@ -153,6 +188,40 @@ void send_file_data(int socket, const char *data, int size)
         total += sent;
     }
 }
+
+void send_owner_public_param(sqlite3 *db, int socket,const char* username,const char* ownername){
+    usleep(10000); 
+    send_message(socket, "auth_u: ");  
+    
+    sqlite3_stmt *stmt;
+    const char *check_sql = "SELECT public_params FROM owners WHERE username = ? AND ownername = ?";
+
+    if (sqlite3_prepare_v2(db, check_sql, -1, &stmt, 0) != SQLITE_OK) {
+        int error_code = -1;
+        send(socket, &error_code, sizeof(error_code), 0);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, ownername, -1, SQLITE_STATIC);
+
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        const void *public_params = sqlite3_column_blob(stmt, 0);
+        int blob_size = sqlite3_column_bytes(stmt, 0);
+
+        if (public_params && blob_size > 0) {
+            send_file_data(socket, (const char *)public_params, blob_size);
+        } else {
+            int error_code = -1;
+            send(socket, &error_code, sizeof(error_code), 0);
+        }
+    } else {
+        int error_code = -1;
+        send(socket, &error_code, sizeof(error_code), 0);
+    }
+
+    sqlite3_finalize(stmt);}
 
 // Handle authentication
 int authenticate_owner(sqlite3 *db, int client_socket, char *username)
@@ -360,7 +429,7 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             receive_message(client_socket, target_user, sizeof(target_user));
             send_message(client_socket, "Enter 'add' or 'remove' followed by the data class number: ");
             receive_message(client_socket, data_class_action, sizeof(data_class_action));
-
+            send_auth_u(db,client_socket,target_user,username);
             char *action = strtok(data_class_action, " ");
             char *data_class_str = strtok(NULL, " ");
             if (!action || !data_class_str || (strcmp(action, "add") != 0 && strcmp(action, "remove") != 0))
@@ -371,7 +440,7 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
 
             data_class_num = atoi(data_class_str);
 
-            // Check if the row exists
+            // Check if the row exists: REDUNDANT
             sqlite3_stmt *stmt;
             const char *check_sql = "SELECT data_classes FROM auth_u WHERE username = ? AND ownername = ?";
             sqlite3_prepare_v2(db, check_sql, -1, &stmt, 0);
@@ -506,7 +575,9 @@ void handle_user(sqlite3 *db, int client_socket, const char *username)
         {
             send_message(client_socket, "Enter owner username: ");
             receive_message(client_socket, owner, sizeof(owner));
+            send_auth_u(db,client_socket,username,owner);
 
+            send_owner_public_param(db,client_socket,username,owner);
             send_message(client_socket, "Enter filename: ");
             receive_message(client_socket, filename, sizeof(filename));
 
@@ -534,6 +605,10 @@ void handle_user(sqlite3 *db, int client_socket, const char *username)
 
             send_message(client_socket, "Enter owner username: ");
             receive_message(client_socket, owner, sizeof(owner));
+
+            
+            send_owner_public_param(db,client_socket,username,owner);
+
             receive_message(client_socket, owner, sizeof(owner)); // REceive end of direct communication
 
         }

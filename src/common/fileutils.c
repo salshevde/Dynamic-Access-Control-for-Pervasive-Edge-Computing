@@ -61,10 +61,10 @@ void load_private_params(char *filename, element_t msk[], pairing_t pairing)
     free(json_data);
 
     cJSON *y1 = cJSON_GetObjectItemCaseSensitive(json, "msk[0]");
-    element_init_Zr(msk[0],pairing);
+    element_init_Zr(msk[0], pairing);
     element_from_bytes(msk[0], y1->valuestring);
     cJSON *y2 = cJSON_GetObjectItemCaseSensitive(json, "msk[1]");
-    element_init_Zr(msk[1],pairing);
+    element_init_Zr(msk[1], pairing);
     element_from_bytes(msk[1], y2->valuestring);
     cJSON_Delete(json);
 }
@@ -170,5 +170,92 @@ void load_public_params(char *filename,
     obj = cJSON_GetObjectItemCaseSensitive(json, "dynK");
     element_init_G1(*dynK, *pairing);
     element_from_bytes(*dynK, obj->valuestring);
+    cJSON_Delete(json);
+}
+
+//  User Specific
+void save_user_params(char *filename,
+                      pbc_param_t pairing, element_t pub_u, element_t pub[])
+{
+
+    cJSON *json = cJSON_CreateObject();
+
+    // pub_u
+    char *value = element_to_bytes_array(pub_u);
+    cJSON_AddStringToObject(json, "pub_u", value);
+    // pub_values
+    for (int i = 0; i < 5; i++)
+    {
+        char key[16];
+        snprintf(key, sizeof(key), "pub%d", i);
+        value = element_to_bytes_array(pub[i]);
+        cJSON_AddStringToObject(json, key, value);
+    }
+
+    char *json_string = cJSON_Print(json);
+    write_file(filename, json_string);
+
+    free(value);
+    cJSON_free(json_string);
+    cJSON_Delete(json);
+}
+
+
+void load_user_params(char *filename,
+                      pairing_t pairing,
+                      element_t *pub_u, element_t pub[])
+{
+    char *json_data = read_file(filename);
+    cJSON *json = cJSON_Parse(json_data);
+    free(json_data);
+
+    // g
+    cJSON *obj = cJSON_GetObjectItemCaseSensitive(json, "pub_u");
+    element_init_G1(*pub_u, pairing);
+    element_from_bytes(*pub_u, obj->valuestring);
+
+    // pub_values
+    for (int i = 0; i < 5; i++)
+    {
+
+        char key[16];
+        snprintf(key, sizeof(key), "pub%d", i);
+        obj = cJSON_GetObjectItemCaseSensitive(json, key);
+
+        if (i == 3)
+            element_init_GT(pub[i], pairing);
+        else
+            element_init_G1(pub[i], pairing);
+
+        element_from_bytes(pub[i], obj->valuestring);
+    }
+
+    cJSON_Delete(json);
+}
+
+void store_aggkey(char *filename, element_t k_u)
+{
+
+    cJSON *json = cJSON_CreateObject();
+    // k_u
+    char *value = element_to_bytes_array(k_u);
+    cJSON_AddStringToObject(json, "k_u", value);
+
+    char *json_string = cJSON_Print(json);
+    write_file(filename, json_string);
+
+    free(value);
+    cJSON_free(json_string);
+    cJSON_Delete(json);
+}
+
+void load_aggkey(char *filename, element_t *k_u, pairing_t pairing)
+{   char *json_data = read_file(filename);
+    cJSON *json = cJSON_Parse(json_data);
+    free(json_data);
+
+    cJSON *obj = cJSON_GetObjectItemCaseSensitive(json, "k_u");
+    element_init_G1(*k_u, pairing);
+    element_from_bytes(*k_u, obj->valuestring);
     cJSON_Delete(json);
 }

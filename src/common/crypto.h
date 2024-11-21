@@ -138,4 +138,5 @@ void updateSet(int data_class, int n,
                element_t g_values[], 
                pairing_t pairing);
 
+
 #endif

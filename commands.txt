@@ -7,7 +7,7 @@ cc data-owner.c ../common/crypto.c ../common/cJSON.c ../common/fileutils.c -o ow
 ./owner
 
 cd src/data-user
-gcc data-user.c -o user -lsqlite3
+gcc data-user.c -o user ../common/crypto.c ../common/cJSON.c ../common/fileutils.c -lsqlite3 -lpbc -lssl -lcrypto -lgmp -lpari
 ./user
 
 gcc test.c -lssl -lgmp -lpbc -lcrypto cJSON.c

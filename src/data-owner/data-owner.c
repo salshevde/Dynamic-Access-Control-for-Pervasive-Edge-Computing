@@ -318,7 +318,7 @@ void send_private_file(int socket, const char *filepath, int data_class,
     // Wait for server ready signal
     char buffer[BUFFER_SIZE];
     receive_message(socket, buffer, sizeof(buffer));
-    printf("%ld",ciphertext->total_length);
+    printf("%ld", ciphertext->total_length);
 
     // Send file content
     int total = 0, sent;
@@ -330,7 +330,7 @@ void send_private_file(int socket, const char *filepath, int data_class,
         total += sent;
     }
 
-printf("here");
+    printf("here");
     free(pt_buffer);
     fclose(file);
 }
@@ -378,7 +378,6 @@ void receive_file(int socket, const char *filepath)
     printf("File saved successfully to: %s\n", filepath);
 }
 
-
 // Function to handle owner operations
 void handle_owner_operations(int sock, char *ownername,
                              int n, int data_classes,
@@ -387,6 +386,7 @@ void handle_owner_operations(int sock, char *ownername,
                              element_t g,
                              element_t g_values[],
                              pairing_t pairing,
+                             pbc_param_t param,
                              element_t dynK)
 {
     char buffer[BUFFER_SIZE];
@@ -397,6 +397,7 @@ void handle_owner_operations(int sock, char *ownername,
     int server_fd;
     pthread_t request_thread;
 
+    element_t pub_u, pub[5], k_u;
     while (1)
     {
         // Get operation choice from server
@@ -490,7 +491,50 @@ void handle_owner_operations(int sock, char *ownername,
             fgets(input, sizeof(input), stdin);
             input[strcspn(input, "\n")] = 0;
             send_message(sock, input);
+            int data_class = 0;
 
+            char *token = strtok(strdup(input), " ");
+
+            if (token != NULL)
+            {
+                strcpy(buffer, token);
+                token = strtok(NULL, " ");
+                if (token != NULL)
+                {
+                    data_class = atoi(token);
+                }
+            }
+
+            int action = -1;
+
+            if (strcmp(buffer, "add") == 0)
+            {
+                action = 1;
+            }
+            else if (strcmp(buffer, "revoke") == 0)
+            {
+                action = 0;
+            }
+            // Get Auth_u
+            receive_message(sock, buffer, sizeof(buffer)); // Auth-u prompt
+            receive_message(sock, buffer, sizeof(buffer)); // Auth-u value
+
+            // Calcualte Auth-u
+            int *auth_u = (int *)calloc(data_classes, sizeof(int));
+            char *auth_str = strdup(buffer);
+            token = strtok(auth_str, ",");
+            while (token != NULL)
+            {
+                if (strlen(token) > 0)
+                {
+                    int num = atoi(token);
+                    if (num >= 0 && num <= n - 1)
+                    {
+                        auth_u[num] = 1;
+                    }
+                }
+                token = strtok(NULL, ",");
+            }
             // Get update result : IF NEW -> transmit K_u
             receive_message(sock, buffer, sizeof(buffer));
             // check if invalid
@@ -500,10 +544,22 @@ void handle_owner_operations(int sock, char *ownername,
             }
             else if (strstr(buffer, "UPDATING") != NULL)
             {
+                //
+                const char *base_path = "./params/";
+                size_t path_len = strlen(base_path) + strlen(username) + strlen("/user.param") + 1;
+                char *user_param = (char *)malloc(path_len);
+                snprintf(user_param, path_len, "%s%s/user.param", base_path, username);
+
+                load_user_params(user_param, pairing, &pub_u, pub);
+                updateSet(data_class, n, data_classes, auth_u, action, &dynK, msk, pub_u, pub, mpk, g, g_values, pairing);
                 receive_message(sock, buffer, sizeof(buffer));
             }
             else if (strncmp("NEW USER", buffer, 8) == 0)
             {
+                //
+                char *user_param;
+                extract(pairing, msk, mpk, dynK, g, auth_u, g_values, n, data_classes, &k_u, &pub_u, pub);
+                save_user_params(user_param, param, pub_u, pub);
                 // Setup direct communication listener
                 server_fd = setup_direct_communication_listener();
                 if (server_fd < 0)
@@ -531,9 +587,14 @@ void handle_owner_operations(int sock, char *ownername,
                     {
                         UserConnection user = connection_requests[selected_socket];
 
+                        const char *base_path = "./params/";
+                        size_t path_len = strlen(base_path) + strlen(user.username) + strlen("/aggkey.param") + 1;
+                        char *file_path = (char *)malloc(path_len);
+                        snprintf(file_path, path_len, "%s%s/aggkey.param", base_path, user.username);
+                        store_aggkey(file_path, k_u);
                         printf("\nConnected to %s\n", user.username);
-
-                        close(selected_socket);
+                        send_public_file(user.socket, file_path);
+                        close(user.socket);
                     }
                 } while (selected_socket == -2);
 
@@ -612,7 +673,7 @@ void handle_owner_operations(int sock, char *ownername,
 int main()
 {
     // CRYPTOSYSTEM
-    int lambda = 1024, data_classes = 5; // REUSAE
+    int lambda = 1024, data_classes = 5; // setting values
     int n = data_classes * 2;            // REUSAE
     pbc_param_t param;
     pairing_t pairing;
@@ -749,7 +810,7 @@ int main()
     }
 
     // Handle owner operations
-    handle_owner_operations(sock, ownername, n, data_classes, msk, mpk, g, g_values, pairing, dynK);
+    handle_owner_operations(sock, ownername, n, data_classes, msk, mpk, g, g_values, pairing, param, dynK);
 
     close(sock);
     return 0;
