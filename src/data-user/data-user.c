@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -140,31 +139,6 @@ void receive_file(int socket, const char *filepath)
     fclose(file);
 
     printf("File saved successfully to: %s\n", filepath);
-}
-
-char *create_file_path(char *name, char *type)
-{
-    const char *base_path = "./params/";
-    char dir_path[256];
-
-    // Calculate and construct the directory path
-    snprintf(dir_path, sizeof(dir_path), "%s%s", base_path, name);
-
-    // Create the parent and owner-specific directories if they don't exist
-    mkdir(dir_path, 0777);
-
-    // Calculate the file path length and allocate memory for the full file path
-    size_t path_len = strlen(base_path) + strlen(name) + strlen("/.param") + strlen(type) + 1;
-    char *file_path = (char *)malloc(path_len);
-    if (!file_path)
-    {
-        perror("Error allocating memory for file path");
-        return NULL; // can break
-    }
-
-    // Construct the full file path
-    snprintf(file_path, path_len, "%s%s/%s.param", base_path, name, type);
-    return file_path;
 }
 // void receive_private_file(int socket, const char *filepath, int n, int data_classes,
 //                           int data_class,
@@ -362,16 +336,20 @@ int main()
     {
         // Get operation choice from server
         receive_message(sock, buffer, sizeof(buffer));
+        memset(input, 0, sizeof(input));
 
         char *res = NULL;
         do
         {
+            printf("Enter input: ");
             res = fgets(input, sizeof(input), stdin);
-            input[strcspn(input, "\n")] = 0;
-            printf("input: ,%s,",res);
 
-        } while (res == NULL && res != "\n");
+            if (res)
+            {
+                input[strcspn(input, "\n")] = 0; // Remove newline character
+            }
 
+        } while (res == NULL || strlen(input) == 0);
         send_message(sock, input);
 
         if (input[0] == '3')
@@ -387,7 +365,7 @@ int main()
             ownername[strcspn(ownername, "\n")] = 0;
             send_message(sock, ownername);
 
-            // get param file
+            // get public param file
 
             receive_message(sock, buffer, sizeof(buffer));
             char *public_param = create_file_path(ownername, "public");
@@ -395,9 +373,19 @@ int main()
             load_public_params(public_param, &lambda, &data_classes, &n, &pairing, &g, g_values, &mpk, &dynK);
 
             printf("Loaded public params");
+
+            // get user param file
+
+            receive_message(sock, buffer, sizeof(buffer));
+            char *user_param = create_file_path(ownername, "user");
+            receive_file(sock, user_param); // receive the params file
+            load_user_params(user_param,pairing,&pub_u,pub);
+
+            printf("Loaded user params");
+
+            // Receive auth_u
             receive_message(sock, buffer, sizeof(buffer)); // Auth_u prompt
             // receive_message(sock, buffer, sizeof(buffer)); // AUth_u valoe combines with prev
-
             // Calcualte Auth-u
             int *auth_u = (int *)calloc(data_classes, sizeof(int));
             char *auth_str = strdup(buffer);
@@ -463,6 +451,12 @@ int main()
             {
                 char *aggkey_path = create_file_path(ownername, "aggkey");
                 receive_file(direct_sock, aggkey_path);
+                load_aggkey(aggkey_path,&k_u,pairing);
+
+                char *user_param = create_file_path(ownername,"user");
+                receive_file(direct_sock, user_param);
+                load_user_params(user_param,pairing,&pub_u,pub);
+
                 close(direct_sock);
             }
 

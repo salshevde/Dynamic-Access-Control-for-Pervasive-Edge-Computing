@@ -166,7 +166,7 @@ void send_auth_u(sqlite3 *db, int socket, const char *username, const char *owne
             memcpy(send_buffer, data_classes, len);
             send_buffer[len] = '\n';
 
-            send_buffer[len+1] = '\0';
+            send_buffer[len + 1] = '\0';
 
             // Send the null-terminated string
             send_message(socket, send_buffer);
@@ -215,7 +215,7 @@ void send_owner_public_param(sqlite3 *db, int socket, const char *username, cons
 
     sqlite3_stmt *stmt;
     const char *check_sql = "SELECT public_params FROM owners WHERE username = ?";
-    
+
     if (sqlite3_prepare_v2(db, check_sql, -1, &stmt, 0) != SQLITE_OK)
     {
         int error_code = -1;
@@ -234,6 +234,49 @@ void send_owner_public_param(sqlite3 *db, int socket, const char *username, cons
         if (public_params && blob_size > 0)
         {
             send_file_data(socket, (const char *)public_params, blob_size);
+        }
+        else
+        {
+            int error_code = -1;
+            send(socket, &error_code, sizeof(error_code), 0);
+        }
+    }
+    else
+    {
+        int error_code = -1;
+        send(socket, &error_code, sizeof(error_code), 0);
+    }
+
+    sqlite3_finalize(stmt);
+}
+
+void send_user_public_param(sqlite3 *db, int socket, const char *username, const char *ownername)
+{
+    usleep(10000);
+    send_message(socket, "receiving user param file.. ");
+
+    sqlite3_stmt *stmt;
+    const char *check_sql = "SELECT pub_u FROM auth_u WHERE username = ? AND ownername = ?";
+
+    if (sqlite3_prepare_v2(db, check_sql, -1, &stmt, 0) != SQLITE_OK)
+    {
+        int error_code = -1;
+        send(socket, &error_code, sizeof(error_code), 0);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, username, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, ownername, -1, SQLITE_STATIC);
+
+    int rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW)
+    {
+        const void *user_params = sqlite3_column_blob(stmt, 0);
+        int blob_size = sqlite3_column_bytes(stmt, 0);
+
+        if (user_params && blob_size > 0)
+        {
+            send_file_data(socket, (const char *)user_params, blob_size);
         }
         else
         {
@@ -277,6 +320,9 @@ int authenticate_owner(sqlite3 *db, int client_socket, char *username)
                 send_message(client_socket, "\nAuth Success \n");
 
                 sqlite3_finalize(stmt);
+
+                send_owner_public_param(db, client_socket, username, username);
+
                 return 1;
             }
         }
@@ -478,7 +524,10 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             if (sqlite3_step(stmt) == SQLITE_ROW)
             {
                 send_message(client_socket, "UPDATING USER ACCESS");
+                int size;
 
+                send_user_public_param(db,client_socket,target_user,username);
+                char *new_user_param = receive_file_data(client_socket, &size);
                 // Update existing row
                 const char *existing_classes = (const char *)sqlite3_column_text(stmt, 0);
                 char updated_classes[BUFFER_SIZE];
@@ -512,11 +561,13 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
                 }
 
                 // Update the table
-                const char *update_sql = "UPDATE auth_u SET data_classes = ? WHERE username = (SELECT username FROM users WHERE username = ?) AND ownername = ?";
+                const char *update_sql = "UPDATE auth_u SET data_classes = ? ,pub_u = ? WHERE username = (SELECT username FROM users WHERE username = ?) AND ownername = ?";
                 sqlite3_prepare_v2(db, update_sql, -1, &stmt, 0);
                 sqlite3_bind_text(stmt, 1, updated_classes, -1, SQLITE_STATIC);
-                sqlite3_bind_text(stmt, 2, target_user, -1, SQLITE_STATIC);
-                sqlite3_bind_text(stmt, 3, username, -1, SQLITE_STATIC);
+
+                sqlite3_bind_blob(stmt, 2, new_user_param, size, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 3, target_user, -1, SQLITE_STATIC);
+                sqlite3_bind_text(stmt, 4, username, -1, SQLITE_STATIC);
 
                 if (sqlite3_step(stmt) == SQLITE_DONE)
                 {
@@ -530,12 +581,16 @@ void handle_owner_operations(sqlite3 *db, int client_socket, const char *usernam
             else
             {
                 send_message(client_socket, "NEW USER");
+                int size;
+                char *user_param = receive_file_data(client_socket, &size);
+
                 // Insert a new row
-                const char *insert_sql = "INSERT INTO auth_u (username, ownername, data_classes) VALUES (?, ?, ?)";
+                const char *insert_sql = "INSERT INTO auth_u (username, ownername, data_classes,pub_u) VALUES (?, ?, ?, ?)";
                 sqlite3_prepare_v2(db, insert_sql, -1, &stmt, 0);
                 sqlite3_bind_text(stmt, 1, target_user, -1, SQLITE_STATIC);
                 sqlite3_bind_text(stmt, 2, username, -1, SQLITE_STATIC);
                 sqlite3_bind_text(stmt, 3, data_class_str, -1, SQLITE_STATIC);
+                sqlite3_bind_blob(stmt, 4, user_param, size, SQLITE_STATIC);
 
                 if (sqlite3_step(stmt) == SQLITE_DONE)
                 {
@@ -637,6 +692,8 @@ void handle_user(sqlite3 *db, int client_socket, const char *username)
             receive_message(client_socket, owner, sizeof(owner));
 
             send_owner_public_param(db, client_socket, username, owner);
+
+            send_user_public_param(db, client_socket, username, owner);
 
             receive_message(client_socket, owner, sizeof(owner)); // REceive end of direct communication
         }

@@ -41,6 +41,33 @@ void write_file(const char *filename, const char *content)
     fclose(file);
 }
 
+
+char *create_file_path(char *name, char *type)
+{
+    const char *base_path = "./params/";
+    char dir_path[256];
+
+    // Calculate and construct the directory path
+    snprintf(dir_path, sizeof(dir_path), "%s%s", base_path, name);
+
+    // Create the parent and owner-specific directories if they don't exist
+    mkdir(dir_path, 0777);
+
+    // Calculate the file path length and allocate memory for the full file path
+    size_t path_len = strlen(base_path) + strlen(name) + strlen("/.param") + strlen(type) + 1;
+    char *file_path = (char *)malloc(path_len);
+    if (!file_path)
+    {
+        perror("Error allocating memory for file path");
+        return NULL; // can break
+    }
+
+    // Construct the full file path
+    snprintf(file_path, path_len, "%s%s/%s.param", base_path, name, type);
+    return file_path;
+}
+
+
 // PRIVATE
 
 void save_private_params(char *filename, element_t msk[])

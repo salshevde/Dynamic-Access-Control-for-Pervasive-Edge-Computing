@@ -1175,7 +1175,7 @@ int main()
 
     element_t msk[2], mpk, dynK;
     element_t k_u, pub_u, pub[5];
-
+    load_public_params("./data/public.param",&lambda,&data_classes,&n,&pairing,&g,g_values,&mpk,&dynK);
     //  INITIALIZATION
     start = clock();
     initialize(

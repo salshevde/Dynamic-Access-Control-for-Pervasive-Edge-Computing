@@ -2,6 +2,7 @@
 *.d
 *.txt
 *.param
+test.c
 # Object files
 *.o
 *.ko

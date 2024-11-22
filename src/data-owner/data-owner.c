@@ -404,10 +404,21 @@ void handle_owner_operations(int sock, char *ownername,
         receive_message(sock, buffer, sizeof(buffer));
 
         // Get user input
-        fgets(input, sizeof(input), stdin);
-        input[strcspn(input, "\n")] = 0;
-        send_message(sock, input);
+        memset(input, 0, BUFFER_SIZE);
+        char *res = NULL;
+        do
+        {
+            printf("Enter input: ");
+            res = fgets(input, sizeof(input), stdin);
 
+            if (res)
+            {
+                input[strcspn(input, "\n")] = 0; // Remove newline character
+            }
+
+        } while (res == NULL || strlen(input) == 0);
+
+        send_message(sock, input);
         if (input[0] == '7')
         { // Exit
             break;
@@ -544,23 +555,27 @@ void handle_owner_operations(int sock, char *ownername,
             }
             else if (strstr(buffer, "UPDATING") != NULL)
             {
-                //
-                const char *base_path = "./params/";
-                size_t path_len = strlen(base_path) + strlen(username) + strlen("/user.param") + 1;
-                char *user_param = (char *)malloc(path_len);
-                
-                snprintf(user_param, path_len, "%s%s/user.param", base_path, username);
+                char *user_param = create_file_path(username, "user");
+                // get the preexisting user params
+                receive_message(sock, buffer, sizeof(buffer));
 
+                receive_file(sock, user_param); // receive the params file
                 load_user_params(user_param, pairing, &pub_u, pub);
+                // update params
                 updateSet(data_class, n, data_classes, auth_u, action, &dynK, msk, pub_u, pub, mpk, g, g_values, pairing);
+
+                save_user_params(user_param, pairing, pub_u, pub);
+                send_public_file(sock, user_param);
+
                 receive_message(sock, buffer, sizeof(buffer));
             }
             else if (strncmp("NEW USER", buffer, 8) == 0)
             {
-                //
-                char *user_param;
+
+                char *user_param = create_file_path(username, "user");
                 extract(pairing, msk, mpk, dynK, g, auth_u, g_values, n, data_classes, &k_u, &pub_u, pub);
                 save_user_params(user_param, param, pub_u, pub);
+                send_public_file(sock, user_param);
                 // Setup direct communication listener
                 server_fd = setup_direct_communication_listener();
                 if (server_fd < 0)
@@ -587,14 +602,12 @@ void handle_owner_operations(int sock, char *ownername,
                     if (selected_socket >= 0)
                     {
                         UserConnection user = connection_requests[selected_socket];
-
-                        const char *base_path = "./params/";
-                        size_t path_len = strlen(base_path) + strlen(user.username) + strlen("/aggkey.param") + 1;
-                        char *file_path = (char *)malloc(path_len);
-                        snprintf(file_path, path_len, "%s%s/aggkey.param", base_path, user.username);
-                        store_aggkey(file_path, k_u);
+                        const char *aggkey_path = create_file_path(username, "aggkey");
+                        store_aggkey(aggkey_path, k_u);
                         printf("\nConnected to %s\n", user.username);
-                        send_public_file(user.socket, file_path);
+                        send_public_file(user.socket, aggkey_path);
+                        send_public_file(user.socket, user_param);
+
                         close(user.socket);
                     }
                 } while (selected_socket == -2);
@@ -757,6 +770,16 @@ int main()
             }
         }
         // Load existing cryptosystem
+
+        // get public param file
+
+        // receive_message(sock, buffer, sizeof(buffer)); // AUth success
+
+        receive_message(sock, buffer, sizeof(buffer)); // receiving...
+
+        receive_file(sock, "./params/public.param"); // receive the params file
+        load_public_params("./params/public.param", &lambda, &data_classes, &n, &pairing, &g, g_values, &mpk, &dynK);
+
         load_public_params("./params/public.param", &lambda, &data_classes, &n, &pairing, &g, g_values, &mpk, &dynK);
         load_private_params("./params/private.param", msk, pairing);
     }

@@ -3,8 +3,10 @@
 #include "cJSON.h"
 #include "crypto.h"
 
+#include <sys/stat.h>
 char *read_file(const char *filename);
 void write_file(const char *filename, const char *content);
+char *create_file_path(char *name, char *type);
 void save_private_params(char *filename, element_t msk[]);
 
 void load_private_params(char *filename, element_t msk[], pairing_t pairing);
