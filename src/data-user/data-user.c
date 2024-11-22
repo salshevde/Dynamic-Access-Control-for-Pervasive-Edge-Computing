@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -23,7 +24,7 @@ ssize_t receive_message(int socket, char *buffer, size_t size)
 {
     memset(buffer, 0, size);
 
-    // printf("\nwaiting for server.. \n");
+    printf("\nwaiting for server.. \n");
     usleep(10000);
 
     ssize_t bytes_received = recv(socket, buffer, size - 1, 0);
@@ -35,7 +36,7 @@ ssize_t receive_message(int socket, char *buffer, size_t size)
 // Helper function to safely send messages
 ssize_t send_message(int socket, const char *message)
 {
-    // printf("\nsending server.. %s\n", message);
+    printf("\nsending server.. %s\n", message);
     usleep(10000);
 
     return send(socket, message, strlen(message), 0);
@@ -80,17 +81,19 @@ int setup_direct_communication(char *ownername, char *username)
 
             scanf("%d", &refresh);
         }
-
-        send(direct_sock, username, strlen(username), 0);
-        memset(buffer, 0, MAX_USERNAME);
-        recv(direct_sock, buffer, sizeof(buffer), 0);
-        if (strcmp(buffer, ownername) == 0)
+        if (refresh)
         {
-            send(direct_sock, "1", 1, 0);
-            break;
+            send(direct_sock, username, strlen(username), 0);
+            memset(buffer, 0, MAX_USERNAME);
+            recv(direct_sock, buffer, sizeof(buffer), 0);
+            if (strcmp(buffer, ownername) == 0)
+            {
+                send(direct_sock, "1", 1, 0);
+                break;
+            }
+            else
+                send(direct_sock, "0", 1, 0);
         }
-        else
-            send(direct_sock, "0", 1, 0);
 
     } while (refresh);
     if (!refresh)
@@ -139,6 +142,30 @@ void receive_file(int socket, const char *filepath)
     printf("File saved successfully to: %s\n", filepath);
 }
 
+char *create_file_path(char *name, char *type)
+{
+    const char *base_path = "./params/";
+    char dir_path[256];
+
+    // Calculate and construct the directory path
+    snprintf(dir_path, sizeof(dir_path), "%s%s", base_path, name);
+
+    // Create the parent and owner-specific directories if they don't exist
+    mkdir(dir_path, 0777);
+
+    // Calculate the file path length and allocate memory for the full file path
+    size_t path_len = strlen(base_path) + strlen(name) + strlen("/.param") + strlen(type) + 1;
+    char *file_path = (char *)malloc(path_len);
+    if (!file_path)
+    {
+        perror("Error allocating memory for file path");
+        return NULL; // can break
+    }
+
+    // Construct the full file path
+    snprintf(file_path, path_len, "%s%s/%s.param", base_path, name, type);
+    return file_path;
+}
 // void receive_private_file(int socket, const char *filepath, int n, int data_classes,
 //                           int data_class,
 //                           element_t k_u,
@@ -236,7 +263,7 @@ int main()
     memset(input, 0, sizeof(input));
     memset(username, 0, sizeof(username));
 
-    int lambda, data_classes, n; // REUSAE
+    int lambda, data_classes, n = 10; // REUSAE
     pbc_param_t param;
     pairing_t pairing;
     mpz_t p;
@@ -336,8 +363,15 @@ int main()
         // Get operation choice from server
         receive_message(sock, buffer, sizeof(buffer));
 
-        fgets(input, sizeof(input), stdin);
-        input[strcspn(input, "\n")] = 0;
+        char *res = NULL;
+        do
+        {
+            res = fgets(input, sizeof(input), stdin);
+            input[strcspn(input, "\n")] = 0;
+            printf("input: ,%s,",res);
+
+        } while (res == NULL && res != "\n");
+
         send_message(sock, input);
 
         if (input[0] == '3')
@@ -354,16 +388,15 @@ int main()
             send_message(sock, ownername);
 
             // get param file
-            const char *base_path = "./params/";
-            size_t path_len = strlen(base_path) + strlen(ownername) + strlen("/aggkey.param") + 1;
-            char *file_path_public = (char *)malloc(path_len);
-            snprintf(file_path_public, path_len, "%s%s/aggkey.param", base_path, ownername);
 
-            receive_file(sock,file_path_public ); // receive the params file
-            load_public_params(file_path_public,&lambda,&data_classes,&n,&pairing,&g,g_values,&mpk,&dynK);
-            
+            receive_message(sock, buffer, sizeof(buffer));
+            char *public_param = create_file_path(ownername, "public");
+            receive_file(sock, public_param); // receive the params file
+            load_public_params(public_param, &lambda, &data_classes, &n, &pairing, &g, g_values, &mpk, &dynK);
+
+            printf("Loaded public params");
             receive_message(sock, buffer, sizeof(buffer)); // Auth_u prompt
-            receive_message(sock, buffer, sizeof(buffer));     // AUth_u valoe
+            // receive_message(sock, buffer, sizeof(buffer)); // AUth_u valoe combines with prev
 
             // Calcualte Auth-u
             int *auth_u = (int *)calloc(data_classes, sizeof(int));
@@ -381,10 +414,16 @@ int main()
                 }
                 token = strtok(NULL, ",");
             }
+
             // Get filename prompt
-            receive_message(sock, buffer, sizeof(buffer));
-            fgets(input, sizeof(input), stdin);
-            input[strcspn(input, "\n")] = 0;
+            // receive_message(sock, buffer, sizeof(buffer)); combines with prev prev
+            res = NULL;
+            do
+            {
+                res = fgets(input, sizeof(input), stdin);
+                input[strcspn(input, "\n")] = 0;
+            } while (res == NULL);
+
             send_message(sock, input);
 
             // Get save location
@@ -408,32 +447,27 @@ int main()
             send_message(sock, ownername);
 
             // get param file
-            const char *base_path = "./params/";
-            size_t path_len = strlen(base_path) + strlen(ownername) + strlen("/aggkey.param") + 1;
-            char *file_path_public = (char *)malloc(path_len);
-            snprintf(file_path_public, path_len, "%s%s/aggkey.param", base_path, ownername);
+            receive_message(sock, buffer, sizeof(buffer));
 
-            receive_file(sock,file_path_public ); // receive the params file
-            load_public_params(file_path_public,&lambda,&data_classes,&n,&pairing,&g,g_values,&mpk,&dynK);
+            char *public_param = create_file_path(ownername, "public");
+            receive_file(sock, public_param); // receive the params file
+            load_public_params(public_param, &lambda, &data_classes, &n, &pairing, &g, g_values, &mpk, &dynK);
 
             direct_sock = setup_direct_communication(ownername, username);
+
             if (direct_sock < 0)
             {
                 printf("Failed to establish direct communication\n");
             }
             else
             {
-                const char *base_path = "./params/";
-                size_t path_len = strlen(base_path) + strlen(ownername) + strlen("/aggkey.param") + 1;
-                char *file_path = (char *)malloc(path_len);
-                snprintf(file_path, path_len, "%s%s/aggkey.param", base_path, ownername);
-                receive_file(direct_sock, file_path);
+                char *aggkey_path = create_file_path(ownername, "aggkey");
+                receive_file(direct_sock, aggkey_path);
                 close(direct_sock);
             }
 
             send_message(sock, "Direct Communication Over");
-            close(sock);
-            exit(1);
+            break;
         }
         case '3':
         {

@@ -548,6 +548,7 @@ void handle_owner_operations(int sock, char *ownername,
                 const char *base_path = "./params/";
                 size_t path_len = strlen(base_path) + strlen(username) + strlen("/user.param") + 1;
                 char *user_param = (char *)malloc(path_len);
+                
                 snprintf(user_param, path_len, "%s%s/user.param", base_path, username);
 
                 load_user_params(user_param, pairing, &pub_u, pub);
